@@ -32,7 +32,11 @@ MAX_REPLY_CHARS = 12_000
 #: detail; cutting code loses the program, and the model then rewrites the
 #: missing part from nothing. 40,000 characters is roughly 10,000 tokens, which
 #: the context resolution already sizes for on any model that would answer.
-MAX_CODE_REPLY_CHARS = 40_000
+#: Raised to 100,000 on 11 October 2026: a page is now changed by edits whose
+#: SEARCH parts must match it exactly, so the model has to see all of it, and
+#: the games that prompted this ran to 60,000-69,000 characters -- cut at
+#: 40,000, every fix rebuilt the missing end from nothing. ~25,000 tokens.
+MAX_CODE_REPLY_CHARS = 100_000
 MAX_QUESTION_CHARS = 4_000
 
 
@@ -67,13 +71,35 @@ def revision_prompt(revision: Revision, correction: str) -> str:
 
     reply_note = " (the start of it; the rest was longer than fits here)" if reply_cut else ""
     question_note = " (the start of it)" if question_cut else ""
+    if _carries_a_page(reply):
+        # **A page is changed, not written again -- 11 October 2026.** A
+        # 15,000-character game rewritten to add two characters took eighteen
+        # minutes and could break what worked; the window applies these edits
+        # to the page above (`frontend/src/lib/pageEdits.ts`).
+        closing = (
+            "Make the correction to the page above. Reply with only what changes, as "
+            "SEARCH/REPLACE blocks (lines copied exactly from the page, then the lines "
+            "that replace them, the file named on the line above each block when there "
+            "are several); Zaram applies them and runs the result. Write the whole page "
+            "again only if most of it changes. Say in a sentence what you changed."
+        )
+    else:
+        closing = (
+            "Give the corrected answer to their original question in full, as the "
+            "answer itself rather than a note about what changed. Where your earlier "
+            "answer changed files in the project, make the correction in those files "
+            "too, using the tools, and say what changed."
+        )
     return (
         "The person is revising an earlier answer of yours.\n\n"
         f"They asked{question_note}:\n{question}\n\n"
         f"You answered{reply_note}:\n{reply}\n\n"
         f"Their correction:\n{correction}\n\n"
-        "Give the corrected answer to their original question in full, as the "
-        "answer itself rather than a note about what changed. Where your earlier "
-        "answer changed files in the project, make the correction in those files "
-        "too, using the tools, and say what changed."
+        f"{closing}"
     )
+
+
+def _carries_a_page(reply: str) -> bool:
+    """Whether the earlier answer contains a page the window runs."""
+    lowered = (reply or "").lower()
+    return "```html" in lowered and ("<html" in lowered or "<!doctype" in lowered or "<body" in lowered)

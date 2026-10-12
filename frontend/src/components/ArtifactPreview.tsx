@@ -251,19 +251,32 @@ export default function ArtifactPreview({
                 <p className="text-xs leading-relaxed">{picture.error}</p>
               </div>
             ) : picture.url ? (
-              // Checkerboard-free flat ground rather than white: a generated
-              // image is as likely to be dark as light, and a white surround
-              // makes a dark one look like a hole in the panel.
-              <div
-                className="flex h-full items-center justify-center p-4"
-                style={{ background: 'var(--color-surface-sunken, #0b1120)' }}
-              >
-                <img
-                  src={picture.url}
-                  alt={artifact.filename}
-                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                />
-              </div>
+              artifact.kind === 'video' ? (
+                <div
+                  className="flex h-full items-center justify-center p-4"
+                  style={{ background: 'var(--color-surface-sunken, #0b1120)' }}
+                >
+                  <video
+                    controls
+                    src={picture.url}
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                  />
+                </div>
+              ) : (
+                // Checkerboard-free flat ground rather than white: a generated
+                // image is as likely to be dark as light, and a white surround
+                // makes a dark one look like a hole in the panel.
+                <div
+                  className="flex h-full items-center justify-center p-4"
+                  style={{ background: 'var(--color-surface-sunken, #0b1120)' }}
+                >
+                  <img
+                    src={picture.url}
+                    alt={artifact.filename}
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                  />
+                </div>
+              )
             ) : (
               <div
                 className="flex h-full items-center justify-center"

@@ -32,13 +32,29 @@ Nothing leaves your computer unless you allowed that destination. Connecting a p
 
 ![Activity: 0 bytes left this device in the last 24 hours, one request blocked, every destination with deny, ask and allow, and the log's integrity check.](assets/activity.png)
 
-## Cutting everything off
+## The privacy controls
 
-**Activity → Destinations** lists every server Zaram has ever contacted, with a switch for each: allow, ask, block. *Block everything* stops all outbound traffic at once. A local model keeps working.
+![Settings → Privacy: the kill switch, the per-source rules, Browsing and Web search, and Export.](assets/privacy.png)
+
+**Settings → Privacy** holds every switch about what leaves:
+
+- **Kill switch.** *Cut everything* refuses every outbound request at once, whatever else is allowed. Turning it back on restores your rules exactly as they were. A local model keeps working, because it never needed the network.
+- **Per-source rules.** Each destination is allowed, asked about, or refused, and anything with no rule is refused. Remove a rule with the bin beside it. **Activity → Destinations** lists the same destinations, beside the log of what was sent.
+- **Browsing.** Whether Zaram may open web pages for you. It is one decision rather than one per site, because a single page fetches from dozens of companies you never chose. Every page is still recorded in Activity.
+- **Web search.** See below.
+
+## You should only need a few rules
+
+The rule list stays short on purpose. A connected provider gets its rule when you connect it, and web search needs one for the search engine. Two kinds of request need no rule at all, because the permission travels with the one request:
+
+- **A page a search found.** Reading it is permitted for that exact address, once.
+- **A download you pressed.** *Download* on a voice, or *Install* on computer use, permits that one file. It is logged, and nothing else may go to that site afterwards.
+
+If your list holds dozens of news or shopping sites, they are left over from an older version of Zaram that asked about every page; you can remove them, and search keeps working.
 
 ## Search on the web
 
-Off unless you turn it on, under Settings. When on, Zaram may look things up for questions that need current information, and shows what it found as a source. Pages it reads are logged like anything else.
+Off unless you turn it on, under **Settings → Privacy → Web search**. When on, Zaram may look things up for questions that need current information, and shows what it found as a source. Only the question is sent to the search engine — never anything recalled from your memory — and pages it reads are logged like anything else.
 
 ## When a cloud model is switched off
 

@@ -332,6 +332,14 @@ from runtimes.mcp.api import router as tools_router  # noqa: E402
 
 app.include_router(tools_router)
 
+# Photographs for a page the model wrote: it describes each one (`photo:...`)
+# and the window asks here for a credited, openly licensed picture to put in.
+# Every search goes through the egress gate and is asked about once.
+# `packs/photos`.
+from packs.photos.api import router as photos_router  # noqa: E402
+
+app.include_router(photos_router)
+
 # --- KERNEL LIFECYCLE ---
 kernel = KernelBootstrapper()
 chat_router = None
@@ -339,6 +347,15 @@ spine_maintenance = None
 
 
 _model_server_tasks: set = set()
+
+
+async def _warm_local_model() -> None:
+    """Preload the local model. An optimisation: it never stops anything starting."""
+    try:
+        runtime = kernel.registry.get_runtime("models")
+        await runtime.warm_local_model()
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).debug("local model preload skipped", exc_info=True)
 
 
 def _bring_up_model_servers(providers_runtime) -> None:
@@ -360,7 +377,13 @@ def _bring_up_model_servers(providers_runtime) -> None:
         try:
             status = await asyncio.to_thread(model_servers.ensure_started, server_id)
             if status.get("state") == "starting":
-                await model_servers.refresh_when_up(server_id, providers_runtime.manager.refresh)
+                came_up = await model_servers.refresh_when_up(server_id, providers_runtime.manager.refresh)
+                if came_up:
+                    # The boot preload ran before this server answered, so a
+                    # chosen model that lives here was not in the catalogue and
+                    # nothing was warmed. Now it is, and the first message
+                    # should not be the one that pays for the load.
+                    await _warm_local_model()
         except Exception:  # noqa: BLE001 - never a reason for the product to fail
             logging.getLogger(__name__).debug("could not bring %s up", server_id, exc_info=True)
 
@@ -489,15 +512,7 @@ async def startup_event():
     # pay for it. Fire-and-forget on purpose: the backend must answer /health
     # and /readiness while several gigabytes move onto the card, or the first
     # run screen sits on a spinner deciding the product is broken.
-    async def _warm():
-        try:
-            runtime = kernel.registry.get_runtime("models")
-            await runtime.warm_local_model()
-        except Exception:
-            # A preload is an optimisation. Never let it stop the app starting.
-            pass
-
-    asyncio.create_task(_warm())
+    asyncio.create_task(_warm_local_model())
 
     # Knowledge folders are watched from here on: a file that changes is
     # re-read, one that appears is read, one that goes is marked gone. See
@@ -789,12 +804,102 @@ def _conversation_store():
         return None
 
 
-def _open_conversation(request: "ChatRequest") -> tuple[str, bool]:
+def _keep_pictures_with_message(conversation_id: str, attached) -> list[dict]:
+    """Copy the pictures this message brought into the conversation's folder.
+
+    Returns the metadata to record on the message -- id, name, kind, page name
+    and suffix, **never the bytes**. Only pictures a page or a document can use
+    (they have a page name), and only the ones this conversation has not kept
+    already: the window re-sends the ids of every picture attached so far with
+    each question, and recording them all each time would put the same chip on
+    every message. A picture restored from the kept copy (`kept_as`) is by
+    definition already kept. Never raises: a copy that could not be made means
+    the page shows the "no longer attached" placeholder later, not that the
+    question fails now. `conversations/pictures.py` has the retention answer.
+    """
+    from conversations.api import pictures_store
+    from conversations.pictures import metadata_for
+
+    pictures = pictures_store()
+    if pictures is None or not conversation_id:
+        return []
+    recorded: list[dict] = []
+    for item in attached:
+        if item.kind != "image" or not item.page_name or item.kept_as or not item.data:
+            continue
+        try:
+            if pictures.has(conversation_id, item.id):
+                continue
+            import base64
+
+            if pictures.keep(conversation_id, item.id, item.suffix, base64.b64decode(item.data)):
+                recorded.append(metadata_for(item))
+        except Exception as exc:  # noqa: BLE001 - bookkeeping must not fail a reply
+            logging.getLogger(__name__).warning("Chat: could not keep a picture: %s", exc)
+    return recorded
+
+
+def _restore_kept_pictures(request: "ChatRequest") -> list:
+    """Give a resumed conversation its kept pictures back in this session.
+
+    After a restart, or when a conversation is reopened from History, the
+    session holds none of the pictures the conversation was built from, so a
+    follow-up ("make the photo bigger") would be asked of a model that is told
+    no photo exists, and a document could not place one. Once per session and
+    conversation, the kept copies are registered with the attachment store under
+    the page names they already had (`AttachmentStore.restore_pictures`).
+
+    **For naming and placing only.** The caller adds them to the page guidance
+    and nothing else: they are not sent to the model as images and not composed
+    into the prompt, which would make every follow-up in a resumed conversation
+    a vision request. Never raises.
+    """
+    conversation_id = (request.conversation_id or "").strip()
+    if not conversation_id or not request.session_id:
+        return []
+    try:
+        from conversations.api import pictures_store
+
+        pictures = pictures_store()
+        records = _conversation_store()
+        if pictures is None or records is None:
+            return []
+        if not attachment_store.restore_pending(request.session_id, conversation_id):
+            return []
+        described: dict[str, dict] = {}
+        for message in records.messages(conversation_id):
+            for info in message.attachments:
+                if info.get("id"):
+                    described[str(info["id"])] = info
+        kept = []
+        for picture in pictures.list(conversation_id):
+            info = described.get(picture.id)
+            if info and info.get("page_name"):
+                kept.append(
+                    (
+                        picture.id,
+                        str(info.get("name") or picture.id),
+                        picture.suffix,
+                        str(info["page_name"]),
+                        picture.data,
+                    )
+                )
+        return attachment_store.restore_pictures(request.session_id, conversation_id, kept)
+    except Exception as exc:  # noqa: BLE001 - a missing picture is a placeholder, not a failed reply
+        logging.getLogger(__name__).warning("Chat: could not restore pictures: %s", exc)
+        return []
+
+
+def _open_conversation(request: "ChatRequest", attached=()) -> tuple[str, bool]:
     """The transcript for this exchange, and whether it was just started.
 
     Records the user's message immediately, before any generation. A question
     that produced an error is still a question they asked, and losing it
     because the model failed is exactly the amnesia this store exists to end.
+
+    ``attached`` are the files this request resolved. The pictures among them
+    are kept with the conversation and noted on the message
+    (`_keep_pictures_with_message`).
 
     Returns ``("", False)`` when the store is unavailable, which every caller
     treats as "do not record" rather than as an error.
@@ -820,7 +925,16 @@ def _open_conversation(request: "ChatRequest") -> tuple[str, bool]:
         # attempt that was still thinking and asked the same thing again. Two
         # copies in the transcript would read as two questions.
         if not (request.retry and not started):
-            records.append(conversation_id, USER, request.text)
+            records.append(
+                conversation_id,
+                USER,
+                request.text,
+                attachments=_keep_pictures_with_message(conversation_id, attached) or None,
+            )
+        if started:
+            # Opened by this session, so its pictures are the ones attached
+            # here -- nothing to restore from the kept copies later.
+            attachment_store.note_live(request.session_id, conversation_id)
     except UnknownConversation:
         logging.getLogger(__name__).info(
             "Chat: conversation %s is not in the store; this exchange is not recorded",
@@ -1800,6 +1914,14 @@ async def chat(request: ChatRequest):
         request.session_id, request.attachment_ids
     )
     images = [a.data for a in attached if a.kind == "image" and a.data]
+    # A conversation reopened after a restart gets its kept pictures back for
+    # naming and placing -- not as images to look at. See the helper.
+    _restore_kept_pictures(request)
+    # Every picture this session holds that came from a kept copy, not only the
+    # ones restored on this request: the second follow-up needs the names too.
+    restored_pictures = [
+        a for a in attachment_store.for_session(request.session_id) if a.kept_as
+    ]
 
     choice = _resolve_model(request.model, request.text, has_images=bool(images))
     model = choice.model
@@ -1927,6 +2049,69 @@ async def chat(request: ChatRequest):
         and wants_page_guidance(request.revise.question + " " + request.revise.reply[:2000])
     ):
         system_prompt = system_prompt + "\n\n" + PAGE_GUIDANCE
+        # **The pictures the person attached, by name** -- only here, on a
+        # page request with pictures held, so every other turn's prompt (and
+        # the server's cache of it) is unchanged. Names, never bytes: the
+        # window puts the pictures in when it runs or saves the page.
+        # `attachments/pictures.py`. Every picture sent so far this
+        # conversation is named, so "make the header photo bigger" still
+        # knows what the header photo is.
+        try:
+            from attachments.pictures import page_guidance as _picture_guidance
+            from attachments.pictures import refs_for as _picture_refs
+
+            # A restored picture was not shown to the model this turn, so when
+            # one is named the guidance says the model has not seen it.
+            _pictures = _picture_guidance(
+                _picture_refs([*attached, *restored_pictures]),
+                seen=pictures_seen and not restored_pictures,
+            )
+            if _pictures:
+                system_prompt = system_prompt + "\n\n" + _pictures
+        except Exception:  # noqa: BLE001 - guidance must never fail a reply
+            logging.getLogger(__name__).exception("could not name the attached pictures")
+        # **Real photographs, where the page wants them** -- a tourism site,
+        # a restaurant, a portfolio. The model describes each photo and the
+        # window fetches it afterwards, once the person agrees. A revision of
+        # a page that already uses them is told again so it keeps them.
+        # `packs/photos/page.py`.
+        #
+        # **Offered on every page Zaram builds, and the model decides -- 12
+        # October 2026, the maintainer's call.** It used to be offered only
+        # when a keyword list (`wants_photos`) recognised a site with a public
+        # face, which is a guess made before the page exists. The guidance now
+        # says when photographs belong and when they do not (a game, a tool),
+        # and nothing is searched unless the page actually names a photo.
+        try:
+            from core.page_guidance import asks_to_build_a_page
+            from packs.photos.page import PHOTO_GUIDANCE, wants_photos
+
+            from starters import starter_for
+
+            # Not when a tested starting point takes over: that page is edited
+            # from the starter, a game with no photographs in it, and the
+            # starter's own code is already the longest thing in the prompt.
+            started = request.revise is None and starter_for(request.text) is not None
+            if not started and (
+                wants_photos(request.text) or asks_to_build_a_page(request.text)
+            ) or (
+                request.revise is not None and "photo:" in request.revise.reply
+            ):
+                system_prompt = system_prompt + "\n\n" + PHOTO_GUIDANCE
+        except Exception:  # noqa: BLE001 - guidance must never fail a reply
+            logging.getLogger(__name__).exception("could not offer photographs")
+        # **A tested starting point, for the pages that are hard to get right
+        # from nothing** -- `backend/starters`. Only on a fresh request: a
+        # revision carries the page as it now stands and is edited against that.
+        if request.revise is None:
+            try:
+                from starters import starter_for, starter_guidance
+
+                _starter = starter_for(request.text)
+                if _starter is not None:
+                    system_prompt = system_prompt + "\n\n" + starter_guidance(_starter)
+            except Exception:  # noqa: BLE001 - a starting point must never fail a reply
+                logging.getLogger(__name__).exception("could not offer a starting point")
 
     # **Thinking for code**, when the person chose that middle state of the
     # Thinking switch: a request for code or a page thinks even though the
@@ -2011,7 +2196,7 @@ async def chat(request: ChatRequest):
     # recorded whether or not a reply ever arrives -- a question that produced
     # an error is still a question they asked, and losing it because
     # generation failed is the amnesia this store exists to end.
-    conversation_id, conversation_started = _open_conversation(request)
+    conversation_id, conversation_started = _open_conversation(request, attached)
     # A conversation picked up after a restart gets its recent turns back.
     # Only when it was not just created: a new one has nothing prior, and
     # asking the store for it would be a query with a known answer.
@@ -2569,7 +2754,7 @@ def _drawing_destinations():
 
         return drawing_destinations()
     except Exception:  # noqa: BLE001
-        logger.debug("Egress: could not list drawing destinations", exc_info=True)
+        logging.getLogger(__name__).debug("Egress: could not list drawing destinations", exc_info=True)
         return []
 
 
@@ -5733,6 +5918,20 @@ async def check_preview_page(body: PreviewCheckBody):
     return verdict.as_dict()
 
 
+@app.get("/starters/{name}")
+async def get_starter(name: str):
+    """A tested starting point a reply built on, for the window to apply its
+    changes to. Served by name from Zaram's own folder (`backend/starters`);
+    only a name in the catalogue is answered, so nothing in the URL can point
+    anywhere else."""
+    from starters import STARTERS
+
+    starter = STARTERS.get(name)
+    if starter is None or not starter.path.is_file():
+        raise HTTPException(status_code=404, detail=f"No starting point called {name!r}.")
+    return {"name": starter.name, "code": starter.code()}
+
+
 @app.post("/apps/save")
 async def save_app_folder(body: SaveAppBody):
     """Keep a multi-file app a reply wrote, as a new folder in the output directory.
@@ -6069,6 +6268,15 @@ async def export_everything():
         "Obligations — extracted per document, not yet persisted, so there is "
         "nothing to export"
     )
+    # Named rather than omitted, like the rest. Conversations themselves are
+    # not exported yet either, and the pictures kept beside them are working
+    # files the person attached, which they already have wherever they came
+    # from; they live in the data folder and are removed from History.
+    unavailable.append(
+        "Pictures kept with conversations — copies of images you attached, kept "
+        "so a page keeps showing them; not exported (you have the originals), "
+        "and removable per conversation from History"
+    )
 
     documents = build_export(
         facts=facts,
@@ -6169,6 +6377,23 @@ from attachments import (  # noqa: E402
 #: system makes, and dragging a file onto a message box is not that decision.
 attachment_store = AttachmentStore()
 
+# The documents runtime and the engine read pictures from here when a document
+# is written, by session -- `attachments/pictures.py`.
+from attachments.pictures import use_store as _use_picture_store  # noqa: E402
+
+_use_picture_store(attachment_store)
+
+# The pictures a conversation was about, kept beside it so its pages still show
+# them after a restart (`conversations/pictures.py` carries the retention
+# answer). Removing a conversation's pictures also lets the live session drop
+# its own working copies.
+from conversations.api import set_pictures as _set_conversation_pictures  # noqa: E402
+from conversations.pictures import ConversationPictures  # noqa: E402
+
+_set_conversation_pictures(
+    ConversationPictures(), on_removed=attachment_store.detach_pictures
+)
+
 #: Commitments read out of the documents the user ingests.
 #:
 #: Built here rather than inside `IngestService` so that a build without it
@@ -6257,6 +6482,48 @@ async def add_chat_attachments(
 async def list_chat_attachments(session_id: str = "default"):
     """What this conversation currently holds."""
     return {"attachments": [a.to_dict() for a in attachment_store.for_session(session_id)]}
+
+
+@app.get("/chat/attachments/{attachment_id}/content")
+async def chat_attachment_content(attachment_id: str, session_id: str = "default"):
+    """The picture itself, for the window to put into a page it is showing.
+
+    A page the model wrote refers to a picture by name; the window needs the
+    bytes to draw it and does not have them (the file was read by this
+    process). Images only -- a document's text is not served back -- and
+    **session-checked** like `resolve`, so an id from another conversation
+    answers 404 rather than a stranger's photograph. The media type is read
+    from the bytes, never from the file name: it ends up in a `data:` URI a
+    browser honours. Working state, so `no-store`.
+    """
+    from fastapi.responses import Response
+
+    found, _ = attachment_store.resolve(session_id, [attachment_id])
+    item = found[0] if found else None
+    if item is None or item.kind != "image" or not item.data:
+        raise HTTPException(status_code=404, detail="That picture is not attached any more.")
+    import base64
+
+    raw = base64.b64decode(item.data)
+    media_type = _sniff_any_image(raw)
+    if media_type is None:
+        raise HTTPException(status_code=415, detail="That picture is in a format a page cannot show.")
+    return Response(content=raw, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+
+def _sniff_any_image(data: bytes) -> str | None:
+    """The media type of the formats a browser draws, read from the bytes."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data.startswith(b"BM"):
+        return "image/bmp"
+    return None
 
 
 @app.delete("/chat/attachments/{attachment_id}")
@@ -6650,19 +6917,28 @@ def _open_code_project(project_id: str | None) -> None:
     previous request's root in place would let a question asked with no project
     open read the last repository somebody looked at.
     """
+    from core.open_project import set_open_project
     from packs.code import set_active_root
     from projects.records import ProjectType, UnknownProject
 
     wanted = (project_id or "").strip()
     if not wanted:
         set_active_root(None)
+        set_open_project(None)
         return
 
     try:
         project = project_records.get(wanted)
     except (UnknownProject, Exception):  # noqa: BLE001 - a lookup must not fail a reply
         set_active_root(None)
+        set_open_project(None)
         return
+
+    # The name, for every type of project and not only a coding one: a
+    # question that names the open project is about it, and should not be sent
+    # to a search engine as though it were about the world. See
+    # `core/open_project.py`.
+    set_open_project(project.name)
 
     set_active_root(
         project.root if project.type is ProjectType.CODING and project.root else None,
@@ -7341,6 +7617,117 @@ async def voice_list():
     )
 
 
+def _speaking_engine():
+    """(engine name, its tier, its connector) for the speech engine speaking now.
+
+    **Read off `SpeechRuntime`, the object the kernel actually holds.** The voice and
+    tier routes called `kernel.speech_runtime.manager`, an attribute `SpeechRuntime`
+    has never had, so in the running app the voice list and both tier switches
+    answered 500 and the Voices panel showed nothing at all. Their tests built a fake
+    runtime that had one. Found 10 October 2026 by running the route against a live
+    backend; `tests/test_the_voice_routes_use_the_real_runtime.py` holds it.
+    """
+    from voice.tier_router import TIER_CONFIGS
+
+    try:
+        connector = kernel.speech_runtime.get_active_connector()
+    except Exception:  # noqa: BLE001 - no engine yet is an answer, not a crash
+        return None, None, None
+    name = getattr(connector, "connector_id", None)
+    tier = next((c.tier for c in TIER_CONFIGS if c.provider_name == name), None)
+    return name, tier, connector
+
+
+@app.get("/voice/voices/active")
+async def voice_list_active():
+    """Voices from the currently active TTS provider.
+
+    Returns the active provider's discovered voices. For local providers,
+    checks local cache for install status. For cloud providers, returns
+    availability based on provider health and API key configuration.
+    """
+    if not kernel.speech_runtime:
+        return {"provider": None, "voices": [], "active_tier": None}
+
+    provider_name, active_tier, connector = _speaking_engine()
+    health: Dict[str, Any] = {}
+    if connector is not None:
+        try:
+            health = await connector.health_check() or {}
+        except Exception as exc:  # noqa: BLE001 - the list must not fail on a health probe
+            health = {"status": "error", "error": str(exc)}
+
+    # **Kokoro's pack is named from the dated local manifest, not from the provider.**
+    # The provider's own discovery lists what Hugging Face says, which rule 7g forbids
+    # asking unprompted, so on a working install it reports *no voices at all* -- and
+    # this screen came up empty, with nothing to scroll, test or download. The manifest
+    # names all of them offline and `installed` is read off the local cache, so the
+    # list is whole before anyone has downloaded a thing. `/voice/voices` has always
+    # answered from it; this route had stopped.
+    pack: Dict[str, Dict[str, Any]] = {}
+    if (provider_name or "").startswith("kokoro"):
+        from voice import voice_manifest
+
+        try:
+            from voice.config import KokoroConfig
+
+            backend = KokoroConfig.load().backend
+        except Exception:
+            backend = "torch"
+        catalogue = await asyncio.to_thread(
+            voice_manifest.catalogue, backend=backend, default_voice=_default_voice_name()
+        )
+        pack = {row["id"]: row for row in catalogue.get("voices", [])}
+
+    voice_list = []
+    if pack:
+        for voice_id, row in pack.items():
+            voice_list.append({
+                "id": voice_id,
+                "name": row["name"],
+                "language": row["language"],
+                "language_code": row["language_code"],
+                "gender": row["gender"],
+                "provider": provider_name,
+                # Offered at all: not behind a language pack the install lacks. Greyed,
+                # with what it needs, when it is -- not hidden.
+                "available": row["requires"] is None,
+                "installed": row["installed"],
+                "requires": row["requires"],
+                "size_bytes": row["size_bytes"],
+                "default": row["default"],
+                "grade": row["grade"],
+            })
+    elif connector is not None:
+        # A provider with nothing to download: what it says it can serve is on hand.
+        try:
+            listed = await connector.list_voices()
+        except Exception:  # noqa: BLE001
+            listed = []
+        for voice in listed:
+            voice_list.append({
+                "id": voice.id,
+                "name": voice.name or voice.id,
+                "language": voice.language or "unknown",
+                "language_code": voice.language_code or "",
+                "gender": getattr(voice.gender, "value", str(voice.gender or "unknown")),
+                "provider": provider_name,
+                "available": True,
+                "installed": True,
+                "requires": None,
+                "size_bytes": 0,
+                "default": False,
+                "grade": (voice.metadata or {}).get("grade"),
+            })
+
+    return {
+        "provider": provider_name,
+        "active_tier": active_tier.name if active_tier else None,
+        "voices": voice_list,
+        "provider_health": health.get("status", "unknown"),
+    }
+
+
 @app.post("/voice/voices/{voice_id}/download")
 async def voice_download(voice_id: str):
     """Fetch one voice, because a person pressed the button that says so.
@@ -7364,7 +7751,7 @@ async def voice_download(voice_id: str):
     except Exception:
         backend = "torch"
     try:
-        await asyncio.to_thread(voice_manifest.fetch_voice, voice_id, backend=backend)
+        await asyncio.to_thread(voice_manifest.fetch_voice, voice_id, backend=backend, asked_for=True)
     except EgressDenied as denied:
         raise HTTPException(status_code=403, detail=str(denied)) from denied
     except Exception as exc:
@@ -7382,6 +7769,150 @@ async def voice_health():
         return {"status": "unavailable", "reason": "Speech runtime not initialized"}
     health = kernel.speech_runtime.health_check()
     return health
+
+
+# =============================================================================
+# 4-Tier Voice Pipeline: Tier Management
+# =============================================================================
+
+@app.get("/voice/tier")
+async def voice_tier_status():
+    """Every speech engine Zaram knows of, whether this machine could run it, and which speaks.
+
+    **Read from the tier table and the engine that is really speaking, not from a
+    health report that never carried either.** This returned
+    `kernel.speech_runtime.health_check()["tier_status"]`, and `SpeechRuntime`'s health
+    has no such key -- the four-tier router was never wired into the runtime that
+    speaks -- so the list was always empty, the Voices panel showed no engines, and
+    "where are the other voice options?" had no answer on screen. Measured 10 October
+    2026 against a live backend. `list_tier_status` is a pure function of the hardware
+    profile; the active tier is the one whose provider is the connector speaking now.
+    """
+    if not kernel.speech_runtime:
+        return {"status": "unavailable", "reason": "Speech runtime not initialized"}
+
+    from voice.tier_router import TIER_CONFIGS, list_tier_status
+
+    health = kernel.speech_runtime.health_check()
+    speaking = health.get("active_connector")
+    active = next((c for c in TIER_CONFIGS if c.provider_name == speaking), None)
+    try:
+        tiers = await asyncio.to_thread(list_tier_status)
+    except Exception as exc:  # noqa: BLE001 - a probe failure must not hide which engine speaks
+        logging.getLogger(__name__).debug("tier status unavailable: %s", exc)
+        tiers = {}
+    return {
+        "active_tier": active.tier.name if active else None,
+        "active_provider": speaking,
+        # Only one engine is built, so there is nothing for automatic selection to
+        # choose between; saying "auto" would describe a mechanism that is not running.
+        "auto_tier_enabled": False,
+        "prefer_local": True,
+        "tier_status": tiers,
+    }
+
+
+@app.post("/voice/tier/select")
+async def voice_tier_select(tier: str):
+    """Manually select a TTS tier (disables auto-selection)."""
+    if not kernel.speech_runtime:
+        raise HTTPException(status_code=503, detail="Speech runtime not initialized")
+
+    from voice.tier_router import VoiceTier
+
+    try:
+        target_tier = VoiceTier[tier.upper()]
+    except KeyError:
+        raise HTTPException(status_code=400, detail=f"Unknown tier: {tier}. Valid: {[t.name for t in VoiceTier]}")
+
+    from voice.tier_router import TIER_CONFIGS
+
+    config = next(c for c in TIER_CONFIGS if c.tier == target_tier)
+    if not config.implemented:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{config.provider_name} is not built yet, so Zaram cannot speak through it.",
+        )
+    speaking, _tier, _connector = _speaking_engine()
+    if config.provider_name != speaking:
+        # Only one engine is built today, so there is nothing to switch to; this says
+        # so rather than pretending a switch happened.
+        raise HTTPException(status_code=409, detail=f"Zaram cannot switch to {config.provider_name} yet.")
+    return {"selected_tier": target_tier.name, "provider": speaking, "reason": "already speaking"}
+
+
+@app.post("/voice/tier/auto")
+async def voice_tier_auto():
+    """Re-enable automatic tier selection."""
+    if not kernel.speech_runtime:
+        raise HTTPException(status_code=503, detail="Speech runtime not initialized")
+
+    speaking, tier, _connector = _speaking_engine()
+    return {
+        "selected_tier": tier.name if tier else None,
+        "provider": speaking,
+        "reason": "only one speech engine is built, so it is the one chosen",
+    }
+
+
+@app.get("/voice/hardware")
+async def voice_hardware_profile():
+    """Get detected hardware profile for tier routing decisions."""
+    from voice.hardware_probe import get_hardware_profile
+    profile = get_hardware_profile()
+    return profile.to_dict()
+
+
+# =============================================================================
+# Voice Asset Cleanup
+# =============================================================================
+
+def _voice_to_keep(requested):
+    """The voice a cache cleanup keeps; see `voice.cleanup.resolve_keep_voice`."""
+    from core.user_settings import get_user_settings
+    from voice.cleanup import resolve_keep_voice
+    from voice.config import DEFAULT_KOKORO_VOICE
+
+    return resolve_keep_voice(requested, get_user_settings().voice, DEFAULT_KOKORO_VOICE)
+
+
+@app.get("/voice/cache/status")
+async def voice_cache_status(keep_voice: str = ""):
+    """Get Kokoro voice cache status without modifying anything."""
+    from voice.cleanup import get_cache_status
+    return get_cache_status(keep_voice=_voice_to_keep(keep_voice))
+
+
+class VoiceCacheCleanupBody(BaseModel):
+    """What `POST /voice/cache/cleanup` is asked.
+
+    **A dry run unless it says otherwise.** The route used to read these as query
+    parameters while every caller sent a JSON body, so a request for a preview was
+    ignored and the defaults -- delete, and keep one particular voice -- applied.
+    Deleting files somebody downloaded is the half of this that cannot be undone
+    quietly, so the safe answer is the default and the destructive one is asked for.
+    """
+
+    #: The voice to keep. Empty means the one in use: `_voice_to_keep`.
+    keep_voice: Optional[str] = None
+    dry_run: bool = True
+
+
+@app.post("/voice/cache/cleanup")
+async def voice_cache_cleanup(body: VoiceCacheCleanupBody):
+    """Delete downloaded Kokoro voice files except the one in use.
+
+    A dry run unless the body says `dry_run: false`, and the voice kept is the
+    one that speaks now unless the body names another.
+    """
+    if not kernel.speech_runtime:
+        raise HTTPException(status_code=503, detail="Speech runtime not initialized")
+
+    from voice.cleanup import cleanup_unused_voices_async
+    report = await cleanup_unused_voices_async(
+        keep_voice=_voice_to_keep(body.keep_voice), dry_run=body.dry_run
+    )
+    return report.to_dict()
 
 
 # --------------------------------------------------------------------------- #

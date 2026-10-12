@@ -87,8 +87,10 @@ const KIND_ICON: Record<ArtifactKind, React.ReactNode> = {
   spreadsheet: <FileSpreadsheet size={16} />,
   chart: <BarChart3 size={16} />,
   deck: <Presentation size={16} />,
+  presentation: <Presentation size={16} />,
   cv: <UserRound size={16} />,
   image: <ImageIcon size={16} />,
+  video: <ImageIcon size={16} />,
 };
 
 // One accent per kind, drawn from the existing token set. No new hues.
@@ -98,8 +100,10 @@ const KIND_COLOUR: Record<ArtifactKind, string> = {
   spreadsheet: 'var(--color-amber)',
   chart: 'var(--color-violet)',
   deck: 'var(--color-indigo-light)',
+  presentation: 'var(--color-purple)',
   cv: 'var(--color-cyan-light)',
   image: 'var(--color-indigo-light)',
+  video: 'var(--color-indigo-light)',
 };
 
 const relative = (seconds: number) => {

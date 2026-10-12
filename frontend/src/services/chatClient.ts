@@ -188,6 +188,29 @@ export interface ChatTiming {
   totalMs: number | null;
 }
 
+/** The six places a settings tool may open. Mirrors `zaram_self.PLACES`. */
+const PLACES = ['work', 'project', 'memory', 'knowledge', 'activity', 'settings'] as const;
+export type ToolPlace = (typeof PLACES)[number];
+
+/** What a Zaram settings tool asks the window to change. */
+export interface ToolApply {
+  renderer?: 'orb' | 'avatar';
+  open?: ToolPlace;
+}
+
+/** The known keys of an `apply`, with values checked; anything else is
+ *  dropped. `undefined` when nothing usable is left. */
+export function parseApply(raw: unknown): ToolApply | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as Record<string, unknown>;
+  const out: ToolApply = {};
+  if (value.renderer === 'orb' || value.renderer === 'avatar') out.renderer = value.renderer;
+  if (typeof value.open === 'string' && (PLACES as readonly string[]).includes(value.open)) {
+    out.open = value.open as ToolPlace;
+  }
+  return out.renderer || out.open ? out : undefined;
+}
+
 export type ChatEvent =
   | { type: 'token'; content: string }
   | { type: 'usage'; usage: TokenUsage }
@@ -276,6 +299,9 @@ export type ChatEvent =
        *  `''` when the server has no opinion — an attached MCP server is
        *  not inside anybody’s project. */
       grantScope?: string;
+      /** Whether Zaram ships the server. A built-in has no standing grant to
+       *  keep, so the card does not offer *Always* for it. */
+      builtin?: boolean;
       /** On a `confirm`: the task this call was parked on, so the card can
        *  carry the task on rather than ask again from nothing. `''` when no
        *  task was kept. */
@@ -291,6 +317,11 @@ export type ChatEvent =
       image: string;
       /** The URL an app was started on, or `''`. */
       appUrl: string;
+      /** A change the window makes itself, asked for through Zaram's own
+       *  settings tools: which indicator shows, which place opens. Only the
+       *  keys below are ever read, and the backend sends it for Zaram's own
+       *  server only — a stranger's tool cannot steer the window. */
+      apply?: ToolApply;
       /** **Which checklist step this call was made for**, by index, or
        *  absent when the reply had no plan or nothing was open.
        *
@@ -879,9 +910,11 @@ function parseLine(line: string): ChatEvent | null {
         appUrl: typeof data.app_url === 'string' ? data.app_url : '',
         grantable: data.grantable === true,
         grantScope: typeof data.grant_scope === 'string' ? data.grant_scope : '',
+        builtin: data.builtin === true,
         heldTask: typeof data.held_task === 'string' ? data.held_task : '',
         once: data.once === true,
         stepId: typeof data.step_id === 'string' ? data.step_id : '',
+        ...(parseApply(data.apply) ? { apply: parseApply(data.apply) } : {}),
         // Absent on the common case — most replies have no plan — so the key
         // is omitted rather than defaulted. `0` is a real step and must not be
         // confused with "no step", which is why this tests the type.

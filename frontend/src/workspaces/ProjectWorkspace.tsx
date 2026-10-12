@@ -32,6 +32,8 @@ import {
   ChevronDown,
   CornerUpLeft,
   Upload,
+  Play,
+  FolderOpen,
 } from 'lucide-react';
 import { UnfinishedSection } from '@/components/tasks/TaskLists';
 import TerminalPanel from '@/components/project/TerminalPanel';
@@ -50,6 +52,14 @@ import {
   type ProjectType,
   type UnclaimedGroup,
 } from '@/stores/projectStore';
+import { useChatStore } from '@/stores/chatStore';
+import {
+  startAppStack,
+  getStackGroups,
+} from '@/services/appsClient';
+import { openAppAddress } from '@/lib/openInBrowser';
+import { frontendOf, openWhenAnswering } from '@/lib/openStartedApp';
+import { BAR_CHIP } from '@/components/chat/barChip';
 
 /** What each type means, in the user's terms rather than ours. Shown at
  *  creation because that is the moment the choice is made and the only moment
@@ -714,8 +724,42 @@ function ProjectRow({ project, onDelete }: { project: Project; onDelete: () => v
  * created before 7 September has no folder, and a setting nobody can see is how
  * they all stay that way.
  */
+
+/** Infer a logical group from a runner name. */
+function inferGroupFromRunner(runner: string): string | null {
+  const name = runner.toLowerCase();
+  if (name.includes('frontend') || name.includes('web:') || name.includes('vite') || name.includes('next:') || name.includes('react:') || name.includes('svelte:') || name.includes('astro:') || name.includes('nuxt:') || name.includes('remix:')) {
+    return 'frontend';
+  }
+  if (name.includes('backend') || name.includes('api:') || name.includes('server:') || name.includes('django:') || name.includes('flask:') || name.includes('fastapi:') || name.includes('express:') || name.includes('rails:') || name.includes('phoenix:')) {
+    return 'backend';
+  }
+  if (name.includes('worker') || name.includes('queue:') || name.includes('celery:') || name.includes('sidekiq:')) {
+    return 'worker';
+  }
+  if (name.includes('db:') || name.includes('database:') || name.includes('migrate') || name.includes('seed')) {
+    return 'database';
+  }
+  return null;
+}
+
+/**
+ * The folder a coding project reads, on the row, editable.
+ *
+ * Shown **collapsed to one line** when it is set and expanded into the field
+ * when it is not, because those are two different situations: a project with a
+ * repository needs a fact stating which one, and a project without one is an
+ * unfinished setup in which every tool call refuses. Rendering them the same
+ * would hide the second inside the first.
+ *
+ * On the row rather than behind the disclosure triangle: every coding project
+ * created before 7 September has no folder, and a setting nobody can see is how
+ * they all stay that way.
+ */
 function RepositoryRow({ project }: { project: Project }) {
   const setRoot = useProjectStore((s) => s.setRoot);
+  const sendChat = useChatStore((s) => s.send);
+  const fetchRunners = useProjectStore((s) => s.fetchRunners);
   const [draft, setDraft] = useState(project.root);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -725,6 +769,44 @@ function RepositoryRow({ project }: { project: Project }) {
   // hundred pixels above this row. So a path with a typo in it looked like a
   // button that did nothing, which is how this was reported.
   const [refused, setRefused] = useState('');
+
+  // Stack groups detection
+  const [stackGroups, setStackGroups] = useState<Record<string, string[]> | null>(null);
+  const [checkingStack, setCheckingStack] = useState(false);
+
+  useEffect(() => {
+    if (!project.root) return;
+    let cancelled = false;
+    setCheckingStack(true);
+    Promise.all([fetchRunners(project.id), getStackGroups(project.id)])
+      .then(([runners, groups]) => {
+        if (!cancelled) {
+          // Merge inferred groups with backend-detected groups
+          const inferredGroups: Record<string, string[]> = {};
+          for (const runner of runners) {
+            const group = inferGroupFromRunner(runner);
+            if (group) {
+              if (!inferredGroups[group]) inferredGroups[group] = [];
+              inferredGroups[group].push(runner);
+            }
+          }
+          // Use backend groups if available, otherwise fall back to inferred
+          const mergedGroups = Object.keys(groups).length > 0 ? groups : inferredGroups;
+          // Only show stack launch if we have multiple groups with runners
+          const multiGroup = Object.keys(mergedGroups).length > 1;
+          setStackGroups(multiGroup ? mergedGroups : null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStackGroups(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingStack(false);
+      });
+    return () => { cancelled = true; };
+  }, [project.id, project.root]);
 
   const save = useCallback(async () => {
     if (busy) return;
@@ -740,28 +822,94 @@ function RepositoryRow({ project }: { project: Project }) {
     setEditing(false);
   }, [busy, draft, project.id, setRoot]);
 
+  const launchDevServer = useCallback(async () => {
+    if (busy || !project.root) return;
+    // Send a chat message to start the dev server for this project
+    await sendChat('Start the dev server for this project', { projectId: project.id });
+  }, [busy, project.id, project.root, sendChat]);
+
+  const launchStack = useCallback(async () => {
+    if (busy || !project.root || !stackGroups) return;
+    const allRunners = Object.values(stackGroups).flat();
+    setBusy(true);
+    try {
+      const result = await startAppStack(project.id, allRunners);
+      // Open the page in Zaram's own pane once it answers. Chosen by the role
+      // each process reports -- this used to look for "frontend", "web" or
+      // "vite" in a process's name, which is a guess the backend no longer
+      // makes the person's button repeat. Without a pane (a plain browser tab)
+      // it is the system browser, as before.
+      const page = frontendOf(result.processes);
+      if (page) {
+        if (window.zaram?.browser) await openWhenAnswering(page);
+        else openAppAddress(page);
+      }
+    } catch (e) {
+      // Error will be shown by the store's error state
+      console.error('Failed to start app stack:', e);
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, project.id, project.root, stackGroups]);
+
   if (project.root && !editing) {
     return (
-      <div className="mt-2 flex items-center gap-2 pl-7 text-xs">
-        <span style={{ color: 'var(--color-text-faint)' }}>reads</span>
-        <code
-          className="truncate"
-          style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}
-          data-testid="repository-current"
-        >
-          {project.root}
-        </code>
-        <button
-          type="button"
-          onClick={() => {
-            setDraft(project.root);
-            setEditing(true);
-          }}
-          style={{ color: 'var(--color-cyan-light)' }}
-          data-testid="repository-change"
-        >
-          Change
-        </button>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-7 text-xs">
+        {/* The path gives way before the buttons do: it is the long, rarely
+            needed part, and the full text is on hover. `min-w-0` is what lets a
+            flex child shrink below its text, which `truncate` alone does not. */}
+        <span className="flex min-w-0 max-w-full items-center gap-1.5">
+          <span className="shrink-0" style={{ color: 'var(--color-text-faint)' }}>reads</span>
+          <code
+            className="min-w-0 truncate"
+            style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}
+            title={project.root}
+            data-testid="repository-current"
+          >
+            {project.root}
+          </code>
+        </span>
+        <span className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(project.root);
+              setEditing(true);
+            }}
+            className={BAR_CHIP}
+            title="Point this project at a different folder"
+            data-testid="repository-change"
+          >
+            <FolderOpen size={12} className="shrink-0" aria-hidden />
+            Change folder
+          </button>
+          <button
+            type="button"
+            onClick={() => void launchDevServer()}
+            disabled={busy}
+            className={`${BAR_CHIP} disabled:opacity-50`}
+            style={{ color: 'var(--color-cyan-light)' }}
+            data-testid="repository-launch"
+            title="Ask Zaram to start the app and open it in its own browser"
+          >
+            <Play size={12} className="shrink-0" aria-hidden />
+            Run app
+          </button>
+          {stackGroups && Object.keys(stackGroups).length > 1 && (
+            <button
+              type="button"
+              onClick={() => void launchStack()}
+              disabled={busy || checkingStack}
+              className={`${BAR_CHIP} disabled:opacity-50`}
+              style={{ color: 'var(--color-cyan-light)' }}
+              data-testid="repository-launch-stack"
+              title="Start every service (frontend, backend and the rest) and open the app"
+            >
+              <Layers size={12} className="shrink-0" aria-hidden />
+              {checkingStack ? 'Checking…' : 'Run all services'}
+            </button>
+          )}
+        </span>
       </div>
     );
   }

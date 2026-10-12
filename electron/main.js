@@ -464,7 +464,7 @@ async function bootstrap() {
 
   browser = createBrowserService({
     logger: logger.child ? logger.child('browser') : logger,
-    getWindow: () => windows && windows.getMain && windows.getMain(),
+    getWindow: () => windows && windows.getMainWindow(),
     emit: (payload) => pushToRenderer(MAIN_EVENTS.browserTabs, payload),
     // Read per call rather than captured: somebody who turns browsing on in
     // Settings should not have to reopen the tab for it to take effect.

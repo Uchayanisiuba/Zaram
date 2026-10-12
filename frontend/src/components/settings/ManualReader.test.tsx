@@ -20,11 +20,27 @@ const PAGES: Record<string, string> = {
 
 describe('the manual', () => {
   it('lists the pages, opens the first, and shows its pictures from the backend', async () => {
+    // Fetched through the app's own fetch -- the one that carries the credential --
+    // and shown from memory. A bare <img src> to the backend is refused with a 401,
+    // which is how every manual picture came to show only its caption.
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(new Blob(['png'], { type: 'image/png' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const createObjectURL = vi.fn(() => 'blob:manual-landing');
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
     render(<ManualReader onClose={vi.fn()} load={vi.fn().mockResolvedValue(INDEX)} loadPage={vi.fn(async (s: string) => PAGES[s])} />);
     expect(await screen.findByRole('heading', { name: 'What Zaram is' })).toBeInTheDocument();
-    const img = screen.getByRole('img', { name: 'The landing' }) as HTMLImageElement;
-    expect(img.src).toContain('/manual/assets/landing.png');
+    const img = (await screen.findByRole('img', { name: 'The landing' })) as HTMLImageElement;
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/manual/assets/landing.png');
+    expect(img.src).toBe('blob:manual-landing');
     expect(screen.getByText('The landing')).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it('says so when a picture cannot be loaded, rather than leaving a blank', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('no', { status: 401 })));
+    render(<ManualReader onClose={vi.fn()} load={vi.fn().mockResolvedValue(INDEX)} loadPage={vi.fn(async (s: string) => PAGES[s])} />);
+    expect(await screen.findByText('The picture could not be loaded.')).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 
   it('turns to another page', async () => {

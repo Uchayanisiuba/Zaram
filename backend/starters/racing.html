@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Racing</title>
+<!--
+  Zaram starter: racing. A small, light 3D arcade racer: a car on a closed
+  track, a chase camera, lap counting through checkpoints, lap times and a best
+  lap. Built to run beside a local model: a few merged meshes, no lights, no
+  shadows, pixel ratio 1. Change the SETTINGS block first.
+-->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #8cc4ee; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #start { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center;
+           gap: 14px; background: rgba(12, 16, 28, 0.78); color: #eef2f8; text-align: center; cursor: pointer; user-select: none; }
+  #start h1 { margin: 0; font-size: 44px; letter-spacing: 1px; }
+  #start .go { padding: 12px 28px; border-radius: 8px; background: #e0432f; font-size: 18px; }
+  #start .keys { font-size: 13px; opacity: 0.75; max-width: 520px; line-height: 1.6; }
+  #info { position: fixed; left: 10px; top: 8px; z-index: 5; color: #fff; font-size: 12px; text-shadow: 0 1px 2px #000; pointer-events: none; }
+  #lap { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 5; color: #fff; text-align: center; font-size: 16px;
+         line-height: 1.5; text-shadow: 0 1px 3px #000; pointer-events: none; }
+  #speed { position: fixed; right: 18px; bottom: 14px; z-index: 5; color: #fff; font-size: 34px; font-weight: 700; text-shadow: 0 2px 4px #000; pointer-events: none; }
+  #speed small { font-size: 14px; font-weight: 400; margin-left: 4px; }
+  #msg { position: fixed; left: 50%; top: 28%; transform: translateX(-50%); z-index: 5; color: #fff; font-size: 30px; font-weight: 700;
+         text-align: center; text-shadow: 0 2px 4px #000; pointer-events: none; }
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head>
+<body>
+<div id="start">
+  <h1>Racing</h1>
+  <div class="go">Click to race</div>
+  <div class="keys">W or ↑ accelerate · S or ↓ brake and reverse · A / D or ← → steer · R restart the race · Esc or P pause<br>
+    Stay on the tarmac: the grass slows you down. Pass every checkpoint, in order, to make a lap count.</div>
+</div>
+<div id="info"></div>
+<div id="lap"></div>
+<div id="speed"></div>
+<div id="msg"></div>
+<script type="module">
+import * as THREE from 'three';
+
+// ---------------------------------------------------------------- SETTINGS
+const SEED = 7;                      // scenery layout (trees, mountains)
+// The track is a smooth closed curve through these [x, z] points, in driving order.
+// Keep bends gentler than half the TRACK_WIDTH and keep the loop from crossing itself.
+const TRACK_POINTS = [
+  [0, -120], [80, -125], [150, -90], [170, -20], [130, 40], [60, 60], [40, 110],
+  [-30, 140], [-110, 110], [-148, 35], [-130, -15], [-172, -65], [-135, -118], [-70, -128],
+];
+const TRACK_WIDTH = 18;              // tarmac plus kerbs, side to side
+const SPACING = 4;                   // distance between track samples
+const LAPS = 3;                      // laps in a race
+const GATES = 8;                     // checkpoints around the lap; gate 0 is the start line
+const MAX_SPEED = 52, MAX_REVERSE = 14;           // world units per second (x3.6 shown as km/h)
+const ACCEL = 30, BRAKE = 55, REVERSE_ACCEL = 18, COAST_DRAG = 9;
+const TURN_RATE = 1.9;               // radians per second at best steering speed
+const TURN_FULL_AT = 14;             // below this speed steering is weaker; at 0 the car cannot turn
+const GRIP = 7;                      // higher sticks to the heading, lower slides
+const OFFROAD_SPEED = 0.45;          // top speed on grass as a share of MAX_SPEED
+const OFFROAD_DRAG = 38;             // how hard grass slows a faster car
+const WORLD_LIMIT = 300;             // an invisible wall around the map
+const CAM_BACK = 9, CAM_UP = 3.6, CAM_SMOOTH = 6;  // chase camera
+const FOV = 68, FOV_BOOST = 14;      // field of view at rest and the extra at top speed
+const SPEED_UNIT = 3.6;
+const CAR_COLOR = 0xd9372b, CABIN_COLOR = 0x23262e;
+const SKY = 0x8cc4ee, GRASS = 0x4c9a45, ASPHALT = 0x4a4d55;
+
+// ------------------------------------------------------------------- MESHES
+const LIGHT = (() => { const l = new THREE.Vector3(0.45, 0.8, 0.35).normalize(); return [l.x, l.y, l.z]; })();
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// Collects triangles with a fixed light baked into vertex colours, so the scene
+// needs no lights at all. Every face is turned to look away from the point `o`.
+class Mesher {
+  constructor() { this.pos = []; this.col = []; }
+  tri(a, b, c, hex, o) {
+    let ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    let vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const mx = (a[0] + b[0] + c[0]) / 3 - o[0], my = (a[1] + b[1] + c[1]) / 3 - o[1], mz = (a[2] + b[2] + c[2]) / 3 - o[2];
+    if (nx * mx + ny * my + nz * mz < 0) { const t = b; b = c; c = t; nx = -nx; ny = -ny; nz = -nz; }
+    const len = Math.hypot(nx, ny, nz) || 1;
+    const k = 0.55 + 0.45 * Math.max(0, (nx * LIGHT[0] + ny * LIGHT[1] + nz * LIGHT[2]) / len);
+    const color = new THREE.Color(hex);
+    const pts = [a, b, c];
+    for (let i = 0; i < 3; i++) {
+      this.pos.push(pts[i][0], pts[i][1], pts[i][2]);
+      this.col.push(color.r * k, color.g * k, color.b * k);
+    }
+  }
+  quad(a, b, c, d, hex, o) { this.tri(a, b, c, hex, o); this.tri(a, c, d, hex, o); }
+  box(cx, cy, cz, w, h, d, hex, rotY = 0) {
+    const s = Math.sin(rotY), c = Math.cos(rotY);
+    const corner = (sx, sy, sz) => {
+      const lx = sx * w / 2, lz = sz * d / 2;
+      return [cx + lx * c + lz * s, cy + sy * h / 2, cz - lx * s + lz * c];
+    };
+    const o = [cx, cy, cz];
+    const p = [];
+    for (let i = 0; i < 8; i++) p.push(corner(i & 1 ? 1 : -1, i & 2 ? 1 : -1, i & 4 ? 1 : -1));
+    const faces = [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 5, 4], [2, 3, 7, 6], [0, 2, 6, 4], [1, 3, 7, 5]];
+    for (let i = 0; i < faces.length; i++) this.quad(p[faces[i][0]], p[faces[i][1]], p[faces[i][2]], p[faces[i][3]], hex, o);
+  }
+  pyramid(cx, cy, cz, w, h, hex) {
+    const hw = w / 2;
+    const base = [[cx - hw, cy, cz - hw], [cx + hw, cy, cz - hw], [cx + hw, cy, cz + hw], [cx - hw, cy, cz + hw]];
+    const top = [cx, cy + h, cz], o = [cx, cy + h * 0.3, cz];
+    for (let i = 0; i < 4; i++) this.tri(base[i], base[(i + 1) % 4], top, hex, o);
+    this.quad(base[0], base[1], base[2], base[3], hex, top);
+  }
+  mesh(material) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    g.computeBoundingSphere();
+    return new THREE.Mesh(g, material);
+  }
+}
+const material = new THREE.MeshBasicMaterial({ vertexColors: true });
+const groundMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+
+// ------------------------------------------------------------------- TRACK
+const curve = new THREE.CatmullRomCurve3(TRACK_POINTS.map(([x, z]) => new THREE.Vector3(x, 0, z)), true, 'centripetal');
+const N = Math.max(60, Math.round(curve.getLength() / SPACING));
+const TX = new Float32Array(N), TZ = new Float32Array(N);       // centreline
+const DX = new Float32Array(N), DZ = new Float32Array(N);       // unit direction of travel
+{
+  const pts = curve.getSpacedPoints(N);
+  for (let i = 0; i < N; i++) { TX[i] = pts[i].x; TZ[i] = pts[i].z; }
+  for (let i = 0; i < N; i++) {
+    const a = (i + N - 1) % N, b = (i + 1) % N;
+    const dx = TX[b] - TX[a], dz = TZ[b] - TZ[a], l = Math.hypot(dx, dz) || 1;
+    DX[i] = dx / l; DZ[i] = dz / l;
+  }
+}
+const HALF = TRACK_WIDTH / 2, KERB = 1.2;
+const gateAt = new Float32Array(GATES);
+for (let k = 0; k < GATES; k++) gateAt[k] = (k * N) / GATES;
+
+// The point `off` to the left of the direction of travel at sample i, at height y.
+const edge = (i, off, y) => [TX[i % N] - DZ[i % N] * off, y, TZ[i % N] + DX[i % N] * off];
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(SKY);
+scene.fog = new THREE.Fog(SKY, 160, 720);
+
+(function buildWorld() {
+  const rand = mulberry32(SEED);
+  const ground = new Mesher();
+  // Grass: a grid of patches, each a slightly different green.
+  const cells = 30, size = 1400 / cells;
+  for (let i = 0; i < cells; i++) {
+    for (let j = 0; j < cells; j++) {
+      const x0 = -700 + i * size, z0 = -700 + j * size;
+      const shade = new THREE.Color(GRASS).multiplyScalar(0.82 + rand() * 0.22).getHex();
+      ground.quad([x0, 0, z0], [x0 + size, 0, z0], [x0 + size, 0, z0 + size], [x0, 0, z0 + size], shade, [x0, -5, z0]);
+    }
+  }
+  scene.add(ground.mesh(groundMaterial));
+
+  const road = new Mesher();
+  const below = [0, -5, 0];
+  for (let i = 0; i < N; i++) {
+    const j = i + 1;
+    const stripe = Math.floor(i / 3) % 2 ? 0.92 : 1;
+    const tarmac = new THREE.Color(ASPHALT).multiplyScalar(stripe).getHex();
+    road.quad(edge(i, HALF - KERB, 0.05), edge(i, -(HALF - KERB), 0.05), edge(j, -(HALF - KERB), 0.05), edge(j, HALF - KERB, 0.05), tarmac, below);
+    const kerb = Math.floor(i / 2) % 2 ? 0xd62d2d : 0xf2f2f2;
+    road.quad(edge(i, HALF, 0.06), edge(i, HALF - KERB, 0.06), edge(j, HALF - KERB, 0.06), edge(j, HALF, 0.06), kerb, below);
+    road.quad(edge(i, -HALF, 0.06), edge(i, -(HALF - KERB), 0.06), edge(j, -(HALF - KERB), 0.06), edge(j, -HALF, 0.06), kerb, below);
+    if (i % 3 === 0) road.quad(edge(i, 0.2, 0.07), edge(i, -0.2, 0.07), edge(j, -0.2, 0.07), edge(j, 0.2, 0.07), 0xe8e8e8, below);
+  }
+  // The start line: a chequered strip across the first sample.
+  const cols = 8;
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r < 2; r++) {
+      const a = -(HALF - KERB) + (c * 2 * (HALF - KERB)) / cols, b = a + (2 * (HALF - KERB)) / cols;
+      const t0 = r / 2, t1 = (r + 1) / 2;
+      const pt = (off, t) => [TX[0] + (TX[1] - TX[0]) * t - DZ[0] * off, 0.08, TZ[0] + (TZ[1] - TZ[0]) * t + DX[0] * off];
+      road.quad(pt(a, t0), pt(b, t0), pt(b, t1), pt(a, t1), (c + r) % 2 ? 0x111111 : 0xf5f5f5, below);
+    }
+  }
+  scene.add(road.mesh(groundMaterial));
+
+  const props = new Mesher();
+  // Start gantry.
+  const lx = edge(0, HALF + 1, 0), rx = edge(0, -(HALF + 1), 0);
+  props.box(lx[0], 3.5, lx[2], 1.2, 7, 1.2, 0x30343c);
+  props.box(rx[0], 3.5, rx[2], 1.2, 7, 1.2, 0x30343c);
+  const beamCells = 12;
+  for (let c = 0; c < beamCells; c++) {
+    const off = HALF + 1 - (c + 0.5) * ((2 * (HALF + 1)) / beamCells);
+    const p = edge(0, off, 7.2);
+    props.box(p[0], p[1], p[2], (2 * (HALF + 1)) / beamCells, 1.4, 1.2, c % 2 ? 0x111111 : 0xf5f5f5, Math.atan2(DX[0], DZ[0]));
+  }
+  // Checkpoint posts, one pair at each gate after the start.
+  for (let k = 1; k < GATES; k++) {
+    const i = Math.round(gateAt[k]);
+    for (const side of [1, -1]) {
+      const p = edge(i, side * (HALF + 0.8), 0);
+      props.box(p[0], 1.6, p[2], 0.6, 3.2, 0.6, 0x24b8d6);
+      props.box(p[0], 3.4, p[2], 1.2, 0.6, 1.2, 0xf5c542);
+    }
+  }
+  // Trees and mountains, kept off the track.
+  const clear = (x, z, gap) => {
+    for (let i = 0; i < N; i++) if (Math.hypot(TX[i] - x, TZ[i] - z) < gap) return false;
+    return true;
+  };
+  let planted = 0;
+  for (let tries = 0; tries < 900 && planted < 150; tries++) {
+    const x = (rand() * 2 - 1) * 280, z = (rand() * 2 - 1) * 280;
+    if (!clear(x, z, HALF + 7)) continue;
+    const s = 0.8 + rand() * 0.9;
+    props.box(x, 1.2 * s, z, 0.9 * s, 2.4 * s, 0.9 * s, 0x6b4a2b);
+    props.pyramid(x, 2 * s, z, 4.6 * s, 4.2 * s, 0x2f7d3a);
+    props.pyramid(x, 4.2 * s, z, 3.2 * s, 3.6 * s, 0x3a9448);
+    planted++;
+  }
+  for (let m = 0; m < 22; m++) {
+    const a = (m / 22) * Math.PI * 2 + rand() * 0.2, r = 470 + rand() * 60;
+    props.pyramid(Math.cos(a) * r, 0, Math.sin(a) * r, 150 + rand() * 120, 90 + rand() * 120, 0x6f7f9a);
+  }
+  scene.add(props.mesh(material));
+})();
+
+// --------------------------------------------------------------------- CAR
+const carGroup = new THREE.Group();
+const body = (() => {
+  const m = new Mesher();
+  m.box(0, 0.75, 0, 2.0, 0.7, 4.2, CAR_COLOR);
+  m.box(0, 1.35, -0.3, 1.6, 0.6, 2.0, CABIN_COLOR);
+  m.box(0, 1.35, 1.0, 1.7, 0.1, 0.5, 0x15171c);
+  m.box(0, 1.35, -2.0, 1.9, 0.12, 0.7, 0x15171c);      // spoiler
+  m.box(0.6, 0.78, 2.12, 0.5, 0.2, 0.08, 0xfff3b0);    // headlights
+  m.box(-0.6, 0.78, 2.12, 0.5, 0.2, 0.08, 0xfff3b0);
+  m.box(0.6, 0.78, -2.12, 0.5, 0.2, 0.08, 0xff3b30);   // tail lights
+  m.box(-0.6, 0.78, -2.12, 0.5, 0.2, 0.08, 0xff3b30);
+  return m.mesh(material);
+})();
+carGroup.add(body);
+const wheelMesh = new Mesher();
+wheelMesh.box(0, 0, 0, 0.5, 0.9, 0.9, 0x16171b);
+const wheelGeometry = wheelMesh.mesh(material).geometry;
+const wheels = [];
+for (let i = 0; i < 4; i++) {
+  const w = new THREE.Mesh(wheelGeometry, material);
+  w.position.set(i & 1 ? 1.05 : -1.05, 0.45, i & 2 ? 1.4 : -1.4);
+  carGroup.add(w);
+  wheels.push(w);
+}
+scene.add(carGroup);
+
+// ------------------------------------------------------------------ RENDER
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'low-power' });
+renderer.setPixelRatio(1);
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+const camera = new THREE.PerspectiveCamera(FOV, window.innerWidth / window.innerHeight, 0.5, 1500);
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ------------------------------------------------------------- RACE STATE
+const car = { x: 0, z: 0, h: 0, speed: 0, vx: 0, vz: 0, steer: 0, roll: 0 };
+const race = { laps: 0, nextGate: 1, time: 0, lapStart: 0, last: 0, best: 0, finished: false, total: 0 };
+let near = 0, progress = 0, prevProgress = 0, trackDist = 0, onTrack = true, wrongWay = false;
+let segT = 0;
+
+const wrapD = (d) => { d = ((d % N) + N) % N; return d > N / 2 ? d - N : d; };
+
+// Squared distance from (px, pz) to the track segment i -> i+1; segT is how far along it.
+function segDist(i, px, pz) {
+  const j = (i + 1) % N;
+  const ax = TX[i], az = TZ[i], bx = TX[j] - ax, bz = TZ[j] - az;
+  const l2 = bx * bx + bz * bz || 1;
+  segT = Math.max(0, Math.min(1, ((px - ax) * bx + (pz - az) * bz) / l2));
+  const dx = px - (ax + bx * segT), dz = pz - (az + bz * segT);
+  return dx * dx + dz * dz;
+}
+
+// Finds the nearest part of the track, looking near where the car last was so that
+// two stretches of track that pass close together are never mixed up.
+const WINDOW = 10;
+function locate(px, pz) {
+  let best = Infinity, bi = near, bt = 0;
+  for (let k = -WINDOW; k <= WINDOW; k++) {
+    const i = (near + k + N) % N;
+    const d = segDist(i, px, pz);
+    if (d < best) { best = d; bi = i; bt = segT; }
+  }
+  if (best > TRACK_WIDTH * TRACK_WIDTH * 4) {
+    for (let i = 0; i < N; i++) {
+      const d = segDist(i, px, pz);
+      if (d < best) { best = d; bi = i; bt = segT; }
+    }
+  }
+  near = bi; progress = bi + bt; trackDist = Math.sqrt(best);
+  onTrack = trackDist <= HALF;
+}
+
+function resetRace() {
+  const i = N - 3;                         // a few samples behind the start line
+  car.x = TX[i]; car.z = TZ[i];
+  car.h = Math.atan2(DX[i], DZ[i]);
+  car.speed = car.vx = car.vz = 0; car.steer = car.roll = 0;
+  near = i; locate(car.x, car.z);
+  prevProgress = progress;
+  race.laps = 0; race.nextGate = 1; race.time = 0; race.lapStart = 0; race.last = 0; race.best = 0;
+  race.finished = false; race.total = 0;
+  flash = '';
+}
+
+// A lap counts only when every checkpoint has been passed in order, forwards, and
+// then the line is crossed forwards. Driving backwards over a gate undoes it.
+function forwardGate(k) {
+  if (k === 0) {
+    if (race.nextGate === GATES) completeLap();
+  } else if (k === race.nextGate) {
+    race.nextGate++;
+  }
+}
+function backGate(k) {
+  if (k !== 0 && k === race.nextGate - 1) race.nextGate = k;
+}
+function completeLap() {
+  race.last = race.time - race.lapStart;
+  if (!race.best || race.last < race.best) race.best = race.last;
+  race.lapStart = race.time;
+  race.laps++;
+  race.nextGate = 1;
+  if (race.laps >= LAPS) { race.finished = true; race.total = race.time; flash = 'Finished! ' + fmt(race.time) + ' · R to race again'; flashUntil = Infinity; }
+  else { flash = 'Lap ' + race.laps + '  ' + fmt(race.last); flashUntil = race.time + 2.5; }
+}
+function trackEvents() {
+  const dp = wrapD(progress - prevProgress);
+  // A jump of more than an eighth of the lap is the car cutting across the grass, not driving through a gate.
+  if (dp !== 0 && Math.abs(dp) < N / 8) {
+    for (let k = 0; k < GATES; k++) {
+      const d1 = wrapD(gateAt[k] - prevProgress);
+      if (dp > 0 && d1 > 0 && d1 <= dp) forwardGate(k);
+      else if (dp < 0 && d1 <= 0 && d1 > dp) backGate(k);
+    }
+  }
+  prevProgress = progress;
+}
+
+// ------------------------------------------------------------------- INPUT
+const keys = new Set();
+let playing = false;
+const startScreen = document.getElementById('start');
+function start() { playing = true; startScreen.style.display = 'none'; }
+function pause() {
+  playing = false; keys.clear();
+  startScreen.querySelector('.go').textContent = 'Click to continue';
+  startScreen.style.display = 'flex';
+}
+startScreen.addEventListener('click', start);
+window.addEventListener('keydown', (e) => {
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+  if (!playing) return;
+  keys.add(e.code);
+  if (e.code === 'Escape' || e.code === 'KeyP') pause();
+  if (e.code === 'KeyR') resetRace();
+});
+window.addEventListener('keyup', (e) => keys.delete(e.code));
+window.addEventListener('blur', () => keys.clear());
+
+// -------------------------------------------------------------------- LOOP
+const info = document.getElementById('info'), lapEl = document.getElementById('lap');
+const speedEl = document.getElementById('speed'), msgEl = document.getElementById('msg');
+let flash = '', flashUntil = 0, hudClock = 0;
+const fmt = (t) => { const m = Math.floor(t / 60); return m + ':' + (t - m * 60).toFixed(1).padStart(4, '0'); };
+
+function updateCar(dt) {
+  const up = keys.has('KeyW') || keys.has('ArrowUp'), down = keys.has('KeyS') || keys.has('ArrowDown');
+  const left = keys.has('KeyA') || keys.has('ArrowLeft'), right = keys.has('KeyD') || keys.has('ArrowRight');
+  locate(car.x, car.z);
+  const cap = onTrack ? MAX_SPEED : MAX_SPEED * OFFROAD_SPEED;
+
+  if (down) {
+    if (car.speed > 0) car.speed = Math.max(0, car.speed - BRAKE * dt);
+    else car.speed = Math.max(-MAX_REVERSE * (onTrack ? 1 : OFFROAD_SPEED), car.speed - REVERSE_ACCEL * dt);
+  } else if (up) {
+    if (car.speed < 0) car.speed = Math.min(0, car.speed + BRAKE * dt);
+    else car.speed = Math.min(cap, car.speed + ACCEL * (1.1 - car.speed / MAX_SPEED) * dt);
+  } else if (car.speed > 0) car.speed = Math.max(0, car.speed - COAST_DRAG * dt);
+  else car.speed = Math.min(0, car.speed + COAST_DRAG * dt);
+  if (car.speed > cap) car.speed = Math.max(cap, car.speed - OFFROAD_DRAG * dt);
+
+  // Steering needs speed to work, is strongest at medium speed and eases off flat out.
+  const input = (left ? 1 : 0) - (right ? 1 : 0);
+  const mag = Math.abs(car.speed);
+  const authority = Math.min(1, mag / TURN_FULL_AT) * (1 - 0.4 * Math.min(1, mag / MAX_SPEED));
+  car.h += input * TURN_RATE * authority * (car.speed >= 0 ? 1 : -1) * dt;
+
+  // The car slides a little: its velocity chases the direction it faces.
+  const k = 1 - Math.exp(-GRIP * dt);
+  car.vx += (Math.sin(car.h) * car.speed - car.vx) * k;
+  car.vz += (Math.cos(car.h) * car.speed - car.vz) * k;
+  car.x += car.vx * dt; car.z += car.vz * dt;
+  if (Math.abs(car.x) > WORLD_LIMIT) { car.x = Math.sign(car.x) * WORLD_LIMIT; car.vx = 0; car.speed *= 0.9; }
+  if (Math.abs(car.z) > WORLD_LIMIT) { car.z = Math.sign(car.z) * WORLD_LIMIT; car.vz = 0; car.speed *= 0.9; }
+
+  car.steer += (input * 0.45 - car.steer) * Math.min(1, 10 * dt);
+  car.roll += (-input * 0.06 * Math.min(1, mag / MAX_SPEED * 2) - car.roll) * Math.min(1, 6 * dt);
+
+  locate(car.x, car.z);
+  trackEvents();
+  const along = Math.sin(car.h) * DX[near] + Math.cos(car.h) * DZ[near];
+  wrongWay = along < -0.3 && mag > 3;
+  race.time += dt;
+}
+
+let last = 0, frames = 0, fpsStart = 0, fps = 0, ticks = 0;
+const lookAt = new THREE.Vector3();
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, last ? (now - last) / 1000 : 0);   // a slow frame never becomes a big jump
+  last = now;
+  if (playing && dt > 0) { updateCar(dt); ticks++; }
+
+  carGroup.position.set(car.x, 0, car.z);
+  carGroup.rotation.y = car.h;
+  body.rotation.z = car.roll;
+  wheels[2].rotation.y = wheels[3].rotation.y = car.steer;
+
+  // Chase camera: sits behind and above the car and eases toward that spot.
+  const fx = Math.sin(car.h), fz = Math.cos(car.h);
+  const ease = 1 - Math.exp(-CAM_SMOOTH * dt);
+  camera.position.x += (car.x - fx * CAM_BACK - camera.position.x) * (ticks < 2 ? 1 : ease);
+  camera.position.y += (CAM_UP - camera.position.y) * (ticks < 2 ? 1 : ease);
+  camera.position.z += (car.z - fz * CAM_BACK - camera.position.z) * (ticks < 2 ? 1 : ease);
+  lookAt.set(car.x + fx * 6, 1.2, car.z + fz * 6);
+  camera.lookAt(lookAt);
+  camera.fov = FOV + FOV_BOOST * Math.min(1, Math.abs(car.speed) / MAX_SPEED);
+  camera.updateProjectionMatrix();
+
+  renderer.render(scene, camera);
+
+  frames++;
+  if (now - fpsStart >= 500) { fps = Math.round((frames * 1000) / (now - fpsStart)); frames = 0; fpsStart = now; }
+  hudClock += dt;
+  if (hudClock >= 0.1) {
+    hudClock = 0;
+    info.textContent = fps + ' fps · x ' + car.x.toFixed(0) + ' z ' + car.z.toFixed(0) + (onTrack ? '' : ' · off track');
+    lapEl.innerHTML = 'Lap ' + Math.min(race.laps + 1, LAPS) + ' / ' + LAPS + ' · checkpoint ' + (race.nextGate - 1) + ' / ' + (GATES - 1) +
+      '<br>' + fmt(race.time - race.lapStart) + (race.best ? ' · best ' + fmt(race.best) : '');
+    speedEl.innerHTML = Math.round(Math.abs(car.speed) * SPEED_UNIT) + '<small>km/h</small>';
+    msgEl.textContent = race.time < flashUntil ? flash : wrongWay ? 'WRONG WAY' : '';
+  }
+}
+
+// A read-only view for checking the game from outside; nothing here changes it.
+Object.defineProperty(window, '__game', {
+  value: Object.freeze({
+    get state() {
+      return { x: car.x, z: car.z, heading: car.h, speed: car.speed, vx: car.vx, vz: car.vz, onTrack, trackDist, progress, wrongWay,
+        laps: race.laps, nextGate: race.nextGate, gates: GATES, time: race.time, lapTime: race.time - race.lapStart,
+        last: race.last, best: race.best, finished: race.finished, playing, fps, ticks, samples: N, width: TRACK_WIDTH };
+    },
+    get track() { return Array.from(TX, (x, i) => [x, TZ[i]]); },
+  }),
+});
+
+// -------------------------------------------------------------------- BOOT
+resetRace();
+camera.position.set(car.x - Math.sin(car.h) * CAM_BACK, CAM_UP, car.z - Math.cos(car.h) * CAM_BACK);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

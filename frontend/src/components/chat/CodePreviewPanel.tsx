@@ -45,6 +45,9 @@ import { useLayoutStore } from '@/stores/layoutStore';
 import { recordBrowsed } from '@/services/egressClient';
 import { loadThree, usesThree, vendorPage, type VendoredThree } from '@/lib/previewLibraries';
 import { findStuckLoop } from '@/lib/previewableCode';
+import { inlinePictures, pictureNotes } from '@/lib/pagePictures';
+import { photoNotes, withPhotos } from '@/lib/pagePhotos';
+import { usePhotoStore } from '@/stores/photoStore';
 import { stuckLoopIn } from '@/lib/appFiles';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useViewport } from '@/hooks/useViewport';
@@ -163,9 +166,26 @@ export default function CodePreviewPanel({
   }, [wantsThree, three]);
   // Memoised: the library is two megabytes, and this panel re-renders on
   // every token while a reply is still streaming.
+  // **What is run has the person's pictures in; what is shown as code does
+  // not.** `block` keeps the names the model wrote (the code tab, Copy and the
+  // requests sent back about the page read it); `runnable` is the same page
+  // with each name replaced by the picture, for the frame alone.
+  // Photographs found online join it here, read live from the store, so a
+  // panel opened while they were still being looked for fills in when they
+  // arrive rather than keeping the placeholders it opened with.
+  const foundPhotos = usePhotoStore((s) => s.found);
+  const withFound = useMemo(() => withPhotos(block, foundPhotos), [block, foundPhotos]);
+  const runnable = useMemo(() => inlinePictures(withFound), [withFound]);
+  const runnableEverything = useMemo(
+    () => (runnable.files ? runnable.files.map((f) => f.code).join('\n') : runnable.code),
+    [runnable],
+  );
   const vendored = useMemo(
-    () => (three && wantsThree ? vendorPage(block.code, three, block.files ? everything : '') : null),
-    [block.code, block.files, everything, three, wantsThree],
+    () =>
+      three && wantsThree
+        ? vendorPage(runnable.code, three, runnable.files ? runnableEverything : '')
+        : null,
+    [runnable, runnableEverything, three, wantsThree],
   );
   // Nothing is drawn while the library is being read, rather than a first
   // render that fails on `THREE` and reports a fault that is about to fix
@@ -190,14 +210,14 @@ export default function CodePreviewPanel({
       waitingForThree || held
         ? ''
         : wrapForPreview(
-            vendored ? vendored.body : block.code,
+            vendored ? vendored.body : runnable.code,
             'app',
             allowedHosts,
             // Any non-empty string turns on `data:` in the page's policy, which
             // an app's modules need as much as a vendored library does.
-            (vendored?.prefix ?? '') || (block.modules ? '<!-- the app\'s modules -->' : ''),
+            (vendored?.prefix ?? '') || (runnable.modules ? '<!-- the app\'s modules -->' : ''),
           ),
-    [waitingForThree, held, vendored, block.code, block.modules, allowedHosts],
+    [waitingForThree, held, vendored, runnable, allowedHosts],
   );
 
   // Told to the frame rather than done to it: its origin is opaque, so the
@@ -305,6 +325,9 @@ export default function CodePreviewPanel({
       ? `Nothing left your device — the page asked ${nameThem(reachedFor)} for part of itself, ` +
         'and the preview has no network, so it may look unfinished.'
       : null,
+    // Pictures the person attached that the page names but could not be given.
+    ...pictureNotes(block),
+    ...photoNotes(withFound),
   ]
     .filter(Boolean)
     .join(' ');
@@ -470,7 +493,7 @@ export default function CodePreviewPanel({
           <button
             onClick={() => {
               setSaveNote(null);
-              savePreviewable(block).then(
+              savePreviewable(withFound).then(
                 (where) => where && setSaveNote(`Saved ${block.files?.length} files to ${where}`),
                 (err: unknown) => setSaveNote(`Not saved: ${err instanceof Error ? err.message : 'the save failed'}`),
               );
@@ -760,6 +783,7 @@ function AskPopover({
       <textarea
         autoFocus
         rows={2}
+        spellCheck={true}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {

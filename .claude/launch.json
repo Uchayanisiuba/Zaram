@@ -23,6 +23,15 @@
       "port": 5173
     },
     {
+      "name": "zaram-frontend-private",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd frontend && set ZARAM_BACKEND=http://127.0.0.1:8421&& set ZARAM_API_SECRET=dev-secret&& npx vite --port 5190 --strictPort"
+      ],
+      "port": 5190
+    },
+    {
       "name": "zaram-documents",
       "runtimeExecutable": "npx",
       "runtimeArgs": [

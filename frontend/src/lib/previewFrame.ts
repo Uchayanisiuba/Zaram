@@ -10,9 +10,12 @@
  * compares them.
  */
 import { loadThree, usesThree, vendorPage } from './previewLibraries';
+import { inlinePictures } from './pagePictures';
 import { wrapForPreview, type PreviewableBlock } from './previewableCode';
 
-export async function buildFrameDoc(block: PreviewableBlock): Promise<string> {
+export async function buildFrameDoc(shown: PreviewableBlock): Promise<string> {
+  // Run with the person's pictures in, as the panel does.
+  const block = inlinePictures(shown);
   const everything = block.files ? block.files.map((f) => f.code).join('\n') : block.code;
   let vendored: ReturnType<typeof vendorPage> = null;
   if (usesThree(everything)) {

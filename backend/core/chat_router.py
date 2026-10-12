@@ -26,6 +26,7 @@ from typing import AsyncGenerator, Any
 
 load_dotenv()
 USE_NEW_KERNEL = os.getenv("USE_NEW_KERNEL", "false").lower() == "true"
+USE_PIPELINE = os.getenv("ZARAM_PIPELINE_ENABLED", "false").lower() == "true"
 
 
 class ChatRouter:
@@ -110,12 +111,40 @@ class ChatRouter:
         """
         from core.reasoning import ReasoningSplitter
         from core.streaming_events import StreamEvent, EventType
+        from core.pipeline.pipeline import get_pipeline, run_pipeline
+        from core.pipeline.types import PipelineContext
         # One splitter per reply. Reusing one across replies would carry an
         # unclosed <think> from a truncated answer into the next question, and
         # that answer would vanish into the thinking panel.
         splitter = ReasoningSplitter()
         try:
             yield StreamEvent.start().to_ipc() + "\n"
+            
+            # Prepare request for pipeline
+            request = {
+                "text": text,
+                "model": model,
+                "system_prompt": system_prompt,
+                "session_id": session_id,
+                "project_id": project_id,
+                "only_ids": only_ids,
+                "images": images,
+            }
+            
+            # Run pipeline inlet filters if enabled
+            context = None
+            if USE_PIPELINE:
+                pipeline = get_pipeline()
+                if pipeline and pipeline.enabled:
+                    context = PipelineContext(
+                        request=request,
+                        session_id=session_id,
+                        user_id="user",
+                        project_id=project_id,
+                    )
+                    request = await pipeline.process_inlet(request, context)
+                    system_prompt = request.get("system_prompt", system_prompt)
+            
             # A continuation re-enters the stopped loop and asks nothing new, so
             # it does not recall, does not plan, and does not re-derive a system
             # prompt: the one the task was running under travels with it. That
@@ -134,16 +163,44 @@ class ChatRouter:
                 )
                 if resume
                 else self.execution_engine.execute(
-                    text, model, system_prompt, session_id,
+                    request.get("text", text), model, system_prompt, session_id,
                     project_id=project_id, only_ids=only_ids, images=images,
                 )
             )
+            
+            # Collect response for outlet filters
+            response_chunks = []
+            response_text = ""
+            
             async for item in iterate_in_threadpool(source):
                 if isinstance(item, StreamEvent):
+                    response_chunks.append(("event", item))
                     yield item.to_ipc() + "\n"
                 else:
+                    response_text += item
+                    response_chunks.append(("token", item))
                     for line in _token_events(splitter, item):
                         yield line
+            
+            # Run pipeline outlet filters if enabled
+            if USE_PIPELINE and context is not None:
+                pipeline = get_pipeline()
+                if pipeline and pipeline.enabled:
+                    # Build response dict for outlet filters
+                    response_dict = {
+                        "text": response_text,
+                        "model": model,
+                        "session_id": session_id,
+                        "project_id": project_id,
+                    }
+                    context.response = response_dict
+                    filtered_response = await pipeline.process_outlet(response_dict, context)
+                    # Note: We've already streamed the original response
+                    # In a full implementation, we'd need to re-stream the filtered version
+                    # For now, just log the filtering
+                    if filtered_response != response_dict:
+                        context.metadata["pipeline_outlet_filtered"] = True
+            
             for line in _flush_events(splitter):
                 yield line
             yield StreamEvent.status("complete").to_ipc() + "\n"
@@ -157,6 +214,8 @@ class ChatRouter:
         model: str,
         system_prompt: str = "",
         images: list[str] | None = None,
+        session_id: str = "default",
+        project_id: str | None = None,
     ) -> AsyncGenerator:
         """Transforms legacy ConversationManager events into structured StreamEvents.
 
@@ -171,8 +230,12 @@ class ChatRouter:
         attachment would answer with confident prose about a picture nobody
         looked at, which is precisely rule 9's failure. Saying so costs one
         branch; the alternative is indistinguishable from a correct answer.
+
+        When pipeline is enabled, runs inlet filters before and outlet filters after.
         """
         from core.streaming_events import StreamEvent
+        from core.pipeline.pipeline import get_pipeline
+        from core.pipeline.types import PipelineContext
 
         if images:
             yield StreamEvent.error(
@@ -184,15 +247,43 @@ class ChatRouter:
         from core.reasoning import ReasoningSplitter
         from core.streaming_events import StreamEvent, EventType
         import json
+        
+        # Run pipeline inlet filters if enabled
+        request = {
+            "text": text,
+            "model": model,
+            "system_prompt": system_prompt,
+            "session_id": session_id,
+            "project_id": project_id,
+        }
+        
+        context = None
+        if USE_PIPELINE:
+            pipeline = get_pipeline()
+            if pipeline and pipeline.enabled:
+                context = PipelineContext(
+                    request=request,
+                    session_id=session_id,
+                    user_id="user",
+                    project_id=project_id,
+                )
+                request = await pipeline.process_inlet(request, context)
+                system_prompt = request.get("system_prompt", system_prompt)
+        
         splitter = ReasoningSplitter()
         try:
             yield StreamEvent.start().to_ipc() + "\n"
+            
+            # Collect response for outlet filters
+            response_text = ""
+            
             async for event in iterate_in_threadpool(
-                self.legacy_generator_func(text, model, system_prompt)
+                self.legacy_generator_func(request.get("text", text), model, system_prompt)
             ):
                 if isinstance(event, dict):
                     etype = event.get("type")
                     if etype == "token":
+                        response_text += event.get("content", "")
                         for line in _token_events(splitter, event.get("content", "")):
                             yield line
                     elif etype == "audio":
@@ -204,8 +295,25 @@ class ChatRouter:
                     elif etype == "done":
                         pass
                 elif isinstance(event, str):
+                    response_text += event
                     for line in _token_events(splitter, event):
                         yield line
+            
+            # Run pipeline outlet filters if enabled
+            if USE_PIPELINE and context is not None:
+                pipeline = get_pipeline()
+                if pipeline and pipeline.enabled:
+                    response_dict = {
+                        "text": response_text,
+                        "model": model,
+                        "session_id": session_id,
+                        "project_id": project_id,
+                    }
+                    context.response = response_dict
+                    filtered_response = await pipeline.process_outlet(response_dict, context)
+                    if filtered_response != response_dict:
+                        context.metadata["pipeline_outlet_filtered"] = True
+            
             for line in _flush_events(splitter):
                 yield line
             yield StreamEvent.done().to_ipc() + "\n"

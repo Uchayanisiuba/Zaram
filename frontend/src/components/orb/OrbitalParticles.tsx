@@ -93,6 +93,7 @@ const FIELD: Record<OrbState, FieldMotion> = {
   // behaviour while coding, and a field that quickened under a calm orb would
   // be the state announcing itself through the one channel left.
   coding: { tangential: 15, radial: -3, seconds: 8, opacity: [0.2, 0.9, 0.2] },
+  computer_use: { tangential: 15, radial: -3, seconds: 8, opacity: [0.2, 0.9, 0.2] },
   // Attending: drawn toward the centre and brighter. The strongest inward pull
   // of the five, because listening is the one state that is entirely intake.
   listening: { tangential: 6, radial: -16, seconds: 4.5, opacity: [0.3, 1, 0.3] },

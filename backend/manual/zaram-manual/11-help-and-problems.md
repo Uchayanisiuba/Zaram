@@ -22,6 +22,14 @@ The model's window is full. Zaram says so once, under the reply: quote what it n
 
 Drawing needs Flux on your graphics card or a cloud key with pictures allowed. Settings → Images shows what is available and what each needs.
 
+## Computer use does nothing
+
+Check **Settings → Computer Use**. The cua-driver row should say *HEALTHY* and its switch should be **On**; if it is off, Zaram answers that computer use is switched off rather than pretending. Then start the message with what to do — *click…*, *type…*, *launch…* — or say *take a screenshot* or *list windows*. If a local model stops partway through a task, try a stronger model for that message.
+
+## A voice or a download says it was blocked
+
+If you blocked that site on purpose, or the kill switch is on, a download stays blocked — that is the switch working. Look under **Settings → Privacy**.
+
 ## Something was answered wrongly
 
 Correct the fact in **Memory**. Every later answer changes. If the source document is wrong, fix the document; Zaram re-reads a watched folder on its own.

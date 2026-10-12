@@ -55,7 +55,7 @@ describe('Select', () => {
     expect(post).toHaveBeenLastCalledWith({ __zaramPreviewControl: true, action: 'pick', on: false }, '*');
   });
 
-  it('asks about the part that was picked, for the whole page back', () => {
+  it('asks about the part that was picked, for its changes as edits', () => {
     const onAsk = vi.fn();
     render(<CodePreviewPanel block={block} onClose={() => {}} onAsk={onAsk} />);
     fireEvent.click(screen.getByTestId('pick-toggle'));
@@ -69,7 +69,7 @@ describe('Select', () => {
     const sent = onAsk.mock.calls[0][0] as string;
     expect(sent).toContain('What to change: make it red');
     expect(sent).toContain('body > div#overlay > button#start');
-    expect(sent).toContain('whole updated page');
+    expect(sent).toContain('SEARCH/REPLACE');
     // Picking ends with the question sent.
     expect(screen.queryByTestId('ask-popover')).toBeNull();
   });
@@ -110,7 +110,7 @@ describe('Fix this', () => {
 
     const sent = onAsk.mock.calls[0][0] as string;
     expect(sent).toContain('THREE is not defined');
-    expect(sent).toContain('whole page');
+    expect(sent).toContain('SEARCH/REPLACE');
   });
 });
 
@@ -130,7 +130,7 @@ describe('a page with a loop that cannot end', () => {
     fireEvent.click(screen.getByTestId('stuck-fix'));
     const sent = onAsk.mock.calls[0][0] as string;
     expect(sent).toContain('for(let i=0;i<16;i)');
-    expect(sent).toContain('whole page');
+    expect(sent).toContain('SEARCH/REPLACE');
   });
 
   it('Run anyway starts it', () => {

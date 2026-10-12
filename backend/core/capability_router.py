@@ -45,6 +45,8 @@ class IntentBasedRouter:
         #: not a chat reply where the user expected a file.
         "document": ["document.generate"],
         "translate": ["reasoning.generate"],
+        #: Motion graphics generation — produces video via Code-to-Frame pipeline.
+        "motion": ["motion.generate"],
     }
 
     @classmethod

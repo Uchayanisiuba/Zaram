@@ -13,6 +13,7 @@ import {
 } from '@/lib/faceAtlas'
 import { ShuffleBag, clipsByState, clipNameOf, type AnimationManifest } from '@/lib/animationSet'
 import { STATE_PULSE, pulseAt, pulseBrightness } from '@/lib/embodimentPulse'
+import { boardPlacement, createHoloKeyboard, type BoardPlacement } from './holoKeyboard'
 
 THREE.Cache.enabled = true
 
@@ -88,6 +89,7 @@ const EYES_FOR_STATE: Record<EmbodimentState, EyeCell> = {
   // it -- a face expression invented for a state is the personality this rule
   // exists to refuse.
   coding: 'thinking',
+  computer_use: 'thinking',
   listening: 'listening',
   speaking: 'open',
   swapping: 'swapping',
@@ -407,6 +409,22 @@ function frameFraction(): number {
   return value <= 1 ? value : 0.5
 }
 
+/**
+ * How far the camera steps back while coding, as a multiple of the resting
+ * distance, and how far it lowers, in head heights -- enough to keep the whole
+ * head in shot with the typing hands below it. Both overridable from the URL
+ * (`?codingPullback=`, `?codingDrop=`) for the reason `headFraction` is:
+ * framing is settled by looking, not by reasoning.
+ */
+function codingPullback(): number {
+  return numberParam('codingPullback', 1.25, 1)
+}
+function codingDrop(): number {
+  return numberParam('codingDrop', 0.55, 0)
+}
+/** How long the camera takes to settle into, and out of, the coding framing. */
+const CAMERA_EASE_SECONDS = 0.9
+
 /** How hard the environment lights the armour. Overridable as `?envIntensity=`,
  *  because this and the framing are the two numbers that can only be settled by
  *  looking — too low and a glossy black character is a silhouette, too high and
@@ -709,6 +727,14 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
      *  model is measured, because its size and height come from the head. */
     let glow: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null = null
     let framing = 'not measured'
+    /** The measured head-and-shoulders framing the camera rests at, so the
+     *  frame loop can ease away from it while coding and back afterwards. */
+    let rest: { y: number; dist: number; head: number; pull: number; drop: number } | null = null
+    /** The hands the coding keyboard sits under, found once the model loads. */
+    let hands: [THREE.Object3D, THREE.Object3D] | null = null
+    /** The board's size and horizontal centre, measured once from the body when
+     *  the model loads, so neither can move while the clip plays. */
+    let boardSpec: { centreX: number; width: number } | null = null
     /** How many meshes needed a tangent frame computed for them, reported
      *  because a GLB that starts shipping tangents should stop needing this. */
     let tangentsAdded = 0
@@ -815,6 +841,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     /** When the eyes last changed to something the mouth has not caught up to. */
     let mouthPending: number | null = null
     const faceDebug = new URLSearchParams(window.location.search).has('faceDebug')
+    const keyboardDebug = new URLSearchParams(window.location.search).has('keyboardDebug')
     // No schedule: the idle face holds `sil`, and the phase timer below is
     // never read.
     const neutralRange = neutralHold()
@@ -831,6 +858,22 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     // breath under it and so does this — the colour still reports the state, so
     // nothing is lost but the movement.
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+    // The neon keyboard the coding state brings in. See `holoKeyboard.ts`.
+    const keyboard = createHoloKeyboard(STATE_PULSE.coding.colour)
+    // Board width as a multiple of the shoulder span, and of the head height
+    // for a rig with no arm bones: proportions, not sizes. Widened 1.4x on 12
+    // October 2026 from 0.76 / 1.3, from the hands read off the clip with
+    // `?keyboardDebug`: typing puts the left hand at +0.21..+0.32 and the reach
+    // takes the right one to -0.35, both at or past the edges of the 0.57 board
+    // it replaced. At 0.80 the board spans +-0.40, so the arm stays over it
+    // when it reaches out.
+    const BOARD_PER_SHOULDER = 1.06
+    const BOARD_PER_HEAD = 1.82
+    scene.add(keyboard.group)
+    const handA = new THREE.Vector3()
+    const handB = new THREE.Vector3()
+    const boardAt = new THREE.Vector3()
+    let placed: BoardPlacement | null = null
 
     // ----------------------------------------------------------------- face
 
@@ -947,6 +990,8 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     // which is the state it narrows.
     const FALLS_BACK_TO: Partial<Record<EmbodimentState, EmbodimentState>> = {
       coding: 'thinking',
+      // Another working state with no clip of its own, for the same reason.
+      computer_use: 'thinking',
     }
     const bagFor = (s: EmbodimentState) =>
       bags.get(s) ?? bags.get(FALLS_BACK_TO[s] ?? 'idle') ?? bags.get('idle')
@@ -1102,6 +1147,39 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       // span to fill a fixed fraction of the view. A human avatar, whose skull
       // rises a little above its head bone, frames correctly by the same rule.
       const head = findBone(root, 'head')
+      const leftHand = findBone(root, 'lefthand')
+      const rightHand = findBone(root, 'righthand')
+      if (leftHand && rightHand) hands = [leftHand, rightHand]
+      // **The board is sized from the shoulders, once.** Shoulder width is a
+      // body measure the clip does not change, it scales with the avatar, and
+      // the upper-arm bones that mark it are in every humanoid rig. Measured
+      // here, in the pose the model loads in, and never again: the hands
+      // wander (one reaches out to the side), and a board sized from them stretched.
+      // Without both arms the measured head height stands in, then a constant.
+      {
+        root.updateMatrixWorld(true)
+        const armL = findBone(root, 'leftupperarm')
+        const armR = findBone(root, 'rightupperarm')
+        const a = new THREE.Vector3()
+        const b = new THREE.Vector3()
+        let centreX = 0
+        let width = 0
+        if (armL && armR) {
+          armL.getWorldPosition(a)
+          armR.getWorldPosition(b)
+          centreX = (a.x + b.x) / 2
+          width = a.distanceTo(b) * BOARD_PER_SHOULDER
+        }
+        if (!(width > 0.05)) {
+          const h = findBone(root, 'hips')
+          if (h) {
+            h.getWorldPosition(a)
+            centreX = a.x
+          }
+          width = 0 // set below, once the head has been measured
+        }
+        boardSpec = { centreX, width }
+      }
       const hips = findBone(root, 'hips')
       const box = new THREE.Box3().setFromObject(root)
       const headBase = new THREE.Vector3(0, 1.35, 0)
@@ -1125,6 +1203,8 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       const dist = headHeight / HEAD_FRACTION / (2 * Math.tan(fov / 2))
       camera.position.set(0, centreY, dist)
       camera.lookAt(0, centreY, 0)
+      rest = { y: centreY, dist, head: headHeight, pull: codingPullback(), drop: codingDrop() }
+      if (boardSpec && boardSpec.width === 0) boardSpec.width = headHeight * BOARD_PER_HEAD
       framing = `head ${headBase.y.toFixed(3)}-${headTop.toFixed(3)}m (${headHeight.toFixed(3)}m), centre ${centreY.toFixed(3)}m, camera z ${dist.toFixed(3)}m`
 
       // The state glow, behind the character and facing the camera.
@@ -1491,6 +1571,25 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       const s = stateRef.current
 
       const k = approachRate(dt, RIM_EASE_SECONDS)
+
+      // **While coding, the camera steps back.** The coding clip types at a
+      // keyboard below the chest, and at the head-and-shoulders framing the
+      // hands are out of shot, so the state's one distinguishing motion was
+      // invisible. Eased, never cut, and only for this state: framing that
+      // moved with every state would read as the camera performing. Asked
+      // for by the maintainer, 11 October 2026. Reduced motion jumps.
+      if (rest) {
+        const coding = s === 'coding'
+        const wantDist = coding ? rest.dist * rest.pull : rest.dist
+        const wantY = coding ? rest.y - rest.head * rest.drop : rest.y
+        const c = reducedMotion ? 1 : approachRate(dt, CAMERA_EASE_SECONDS)
+        if (Math.abs(camera.position.z - wantDist) > 1e-4 || Math.abs(camera.position.y - wantY) > 1e-4) {
+          camera.position.z = THREE.MathUtils.lerp(camera.position.z, wantDist, c)
+          camera.position.y = THREE.MathUtils.lerp(camera.position.y, wantY, c)
+          camera.lookAt(0, camera.position.y, 0)
+        }
+      }
+
       rimTarget.setHex(STATE_PULSE[s].colour)
       rim.color.lerp(rimTarget, k)
       rim.intensity = THREE.MathUtils.lerp(rim.intensity, (s === 'swapping' ? 1.1 : 2.2) * rimGain, k)
@@ -1532,6 +1631,39 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         }
       }
       mixer?.update(dt)
+
+      // **The coding keyboard, under the hands, and not following them.** Size
+      // and horizontal centre are the body's (`boardSpec`, measured at load);
+      // height and depth come from the hands only while both are on the board,
+      // because the clip sends the right one out to the side near its end and a
+      // board that tracked it stretched and slid. Otherwise the last good
+      // placement is held. Eased, so it sits still while the fingers tap. A
+      // character with no hand bones gets no keyboard rather than a guessed one.
+      if (hands && boardSpec && (s === 'coding' || keyboard.shown > 0)) {
+        hands[0].getWorldPosition(handA)
+        hands[1].getWorldPosition(handB)
+        placed = boardPlacement(
+          { left: handA, right: handB, centreX: boardSpec.centreX, width: boardSpec.width },
+          keyboard.shown === 0 ? null : placed,
+          approachRate(dt, 0.6),
+        )
+        boardAt.set(placed.x, placed.y, placed.z)
+        keyboard.place(boardAt, placed.width)
+      }
+      keyboard.update(dt, now, s === 'coding' && hands !== null, reducedMotion)
+      // The board's size was set from where the hands go, and the only way to
+      // know where they go is to read them while the clip plays. Off unless
+      // asked for, and read-only -- the same posture as `faceDebug`.
+      if (keyboardDebug && hands && boardSpec) {
+        ;(window as unknown as { __zaramKeyboard?: unknown }).__zaramKeyboard = {
+          centreX: boardSpec.centreX,
+          width: placed?.width ?? null,
+          boardX: placed?.x ?? null,
+          left: handA.toArray(),
+          right: handB.toArray(),
+          shown: keyboard.shown,
+        }
+      }
 
       // Run the idle expression before the eyes, because both halves of the
       // face wear it and the eyes are drawn first.
@@ -1681,6 +1813,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         const mat = m.material
         for (const one of Array.isArray(mat) ? mat : mat ? [mat] : []) one.dispose()
       })
+      keyboard.dispose()
       envRT.dispose()
       pmrem.dispose()
       renderer.dispose()

@@ -73,6 +73,93 @@ async function send(path: string, method: 'POST' | 'PUT' | 'DELETE', body?: unkn
   );
 }
 
+/**
+ * 4-Tier Voice Pipeline — tier selection and hardware eligibility.
+ */
+
+export type VoiceTier = 'TIER_1_BREEZE' | 'TIER_2_CHATTERBOX' | 'TIER_3_QWEN3' | 'TIER_4_KOKORO';
+
+export interface TierStatusEntry {
+  provider: string;
+  eligible: boolean;
+  /** False while the engine behind the tier is a placeholder that cannot speak yet. */
+  implemented?: boolean;
+  reason: string;
+  description: string;
+  requires_cloud: boolean;
+  requires_gpu: boolean;
+}
+
+export interface TierStatus {
+  active_tier: VoiceTier | null;
+  active_provider: string | null;
+  auto_tier_enabled: boolean;
+  prefer_local: boolean;
+  tier_status: Record<VoiceTier, TierStatusEntry>;
+  fallback_tier?: VoiceTier;
+}
+
+export async function fetchTierStatus(): Promise<TierStatus> {
+  return (await get('/voice/tier')) as Promise<TierStatus>;
+}
+
+export async function selectTier(tier: VoiceTier): Promise<{ selected_tier: VoiceTier; provider: string; reason: string }> {
+  return (await send('/voice/tier/select', 'POST', { tier })) as Promise<{ selected_tier: VoiceTier; provider: string; reason: string }>;
+}
+
+export async function enableAutoTier(): Promise<{ selected_tier: VoiceTier; provider: string; reason: string }> {
+  return (await send('/voice/tier/auto', 'POST')) as Promise<{ selected_tier: VoiceTier; provider: string; reason: string }>;
+}
+
+export interface HardwareProfile {
+  gpu_vendor: string;
+  gpu_name: string;
+  total_vram_gb: number | null;
+  free_vram_gb: number | null;
+  total_system_ram_gb: number | null;
+  free_system_ram_gb: number | null;
+  cloud_llm_active: boolean;
+  cloud_llm_provider: string | null;
+  local_llm_active: boolean;
+  local_llm_model_id: string | null;
+  local_llm_vram_footprint_gb: number | null;
+  os_name: string;
+  arch: string;
+}
+
+export async function fetchHardwareProfile(): Promise<HardwareProfile> {
+  return (await get('/voice/hardware')) as Promise<HardwareProfile>;
+}
+
+export interface CacheStatus {
+  total_voices_cached: number;
+  total_size_bytes: number;
+  total_size_mb: number;
+  keep_voice: string;
+  keep_voice_size_bytes: number;
+  deletable_voices: number;
+  deletable_size_bytes: number;
+  deletable_size_mb: number;
+  by_backend: Record<string, { count: number; size_bytes: number; voices: string[] }>;
+}
+
+export async function fetchCacheStatus(keepVoice: string = ''): Promise<CacheStatus> {
+  return (await get(`/voice/cache/status?keep_voice=${encodeURIComponent(keepVoice)}`)) as Promise<CacheStatus>;
+}
+
+export interface CleanupReport {
+  deleted_count: number;
+  freed_bytes: number;
+  freed_mb: number;
+  kept_count: number;
+  dry_run: boolean;
+  errors: string[];
+}
+
+export async function cleanupVoiceCache(keepVoice: string, dryRun: boolean): Promise<CleanupReport> {
+  return (await send('/voice/cache/cleanup', 'POST', { keep_voice: keepVoice, dry_run: dryRun })) as Promise<CleanupReport>;
+}
+
 // --------------------------------------------------------------- providers
 
 /** One entry in the dated manifest of providers a person can pick from. */

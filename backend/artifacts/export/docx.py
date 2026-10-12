@@ -47,6 +47,13 @@ _MAX_BOOKMARK = 40
 #: as ordinary black text that happens to be clickable. Nobody clicks that.
 _LINK_COLOUR = "0563C1"
 
+#: Picture roles that are drawn once above the title instead of in the flow, and
+#: the largest each may be, in millimetres (width, height). The same bounds the
+#: stylesheet gives them on the page: 70 x 18 for a logo, a passport-shaped
+#: 32 x 40 for a photo.
+_MARK_ROLES = {"logo", "photo"}
+_MARK_MAX_MM = {"logo": (70, 18), "photo": (32, 40)}
+
 
 class DocxExporter:
     extension = "docx"
@@ -71,6 +78,14 @@ class DocxExporter:
         # `word_theme` for what that template actually looked like.
         word_theme.apply(word)
 
+        # The marks a document is *about* -- the letterhead's logo, a CV's
+        # photo -- above the title, where the masthead and the CV header draw
+        # them on the page. This file never drew the masthead, so a logo that
+        # reached the HTML reached every format but this one, and .docx is the
+        # default for an invoice and a CV.
+        for image in doc.images:
+            if _MARK_ROLES & set(image.role.split()):
+                _add_picture(word, image)
         word.add_heading(doc.title or "Untitled", level=1)
 
         # Assigned as they are encountered so the bookmark exists by the time
@@ -97,9 +112,9 @@ class DocxExporter:
         # identical silent loss `_add_table` below was written to end.
         images_after: Dict[int, list] = {}
         for image in doc.images:
-            # The letterhead's mark is chrome the masthead draws; printing it
-            # again in the middle of the prose is not what a logo is for.
-            if "logo" in image.role.split():
+            # A mark is drawn once, above the title; printing it again in the
+            # middle of the prose is not what a logo or a photo is for.
+            if _MARK_ROLES & set(image.role.split()):
                 continue
             images_after.setdefault(image.after_block, []).append(image)
 
@@ -391,6 +406,22 @@ def _add_picture(word, image) -> None:
     if usable and picture.width > usable:
         picture.height = int(picture.height * usable / picture.width)
         picture.width = int(usable)
+
+    # A mark is held to the size it has on the page, and a photo sits at the
+    # right margin as it does opposite the name in the HTML.
+    roles = set(image.role.split())
+    for role in ("logo", "photo"):
+        if role in roles and picture.width and picture.height:
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.shared import Mm
+
+            max_w, max_h = Mm(_MARK_MAX_MM[role][0]), Mm(_MARK_MAX_MM[role][1])
+            scale = min(max_w / picture.width, max_h / picture.height, 1.0)
+            picture.width = int(picture.width * scale)
+            picture.height = int(picture.height * scale)
+            if role == "photo":
+                word.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            break
 
     if image.alt:
         try:

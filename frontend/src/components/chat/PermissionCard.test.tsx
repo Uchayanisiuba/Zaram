@@ -118,10 +118,77 @@ describe('the rungs', () => {
     expect(setShell).not.toHaveBeenCalled();
   });
 
-  it('allows always', async () => {
-    render(<PermissionCard call={held()} onAllowed={vi.fn()} />);
+  it('allows always, for a tool no project switch governs', async () => {
+    render(
+      <PermissionCard call={held({ server: 'weather', tool: 'get_forecast', grantScope: '' })} onAllowed={vi.fn()} />,
+    );
     await user().click(screen.getByTestId('allow-tool'));
-    await waitFor(() => expect(grantTool).toHaveBeenCalledWith('code', 'run_in_terminal'));
+    await waitFor(() => expect(grantTool).toHaveBeenCalledWith('weather', 'get_forecast'));
+  });
+
+  it('does not offer always for a built-in server, scoped or not', () => {
+    // Web, draw, jobs: no project switch, but still no standing grant to
+    // keep. The signal is the gate's `builtin`, not the server's name.
+    render(
+      <PermissionCard
+        call={held({ server: 'web', tool: 'fetch_page', grantScope: '', builtin: true })}
+        onAllowed={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('allow-tool')).toBeNull();
+    expect(screen.getByTestId('allow-tool-session')).toBeTruthy();
+    expect(screen.getByText(/no standing/)).toBeTruthy();
+  });
+
+  it('keeps always for an attached server', () => {
+    render(
+      <PermissionCard
+        call={held({ server: 'weather', tool: 'get_forecast', grantScope: '', builtin: false })}
+        onAllowed={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('allow-tool')).toBeTruthy();
+  });
+
+  it('does not offer always for a tool a project switch governs', () => {
+    // The backend cannot keep a standing grant for a built-in (it answers
+    // 409; before that, a 404 the card showed as "did not save"), and a
+    // by-name grant would outlive the switch the person withdraws in Project.
+    render(<PermissionCard call={held()} onAllowed={vi.fn()} />);
+    expect(screen.queryByTestId('allow-tool')).toBeNull();
+    expect(screen.getByTestId('allow-tool-project')).toBeTruthy();
+  });
+
+  it('allows the app stack for the project through the runs switch, and settles', async () => {
+    // The reported bug: "Allow for this project" on start_app_stack. The
+    // request is the runs switch for the open project; the card then says it
+    // is done rather than sitting on "Saving…".
+    const onAllowed = vi.fn();
+    render(
+      <PermissionCard
+        call={held({ tool: 'start_app_stack', grantScope: 'runs', heldTask: 'plan-9' })}
+        onAllowed={onAllowed}
+      />,
+    );
+    await user().click(screen.getByTestId('allow-tool-project'));
+    await waitFor(() => expect(onAllowed).toHaveBeenCalledWith({ planId: 'plan-9', runHeld: false }));
+    expect(setRuns).toHaveBeenCalledWith('ride-share', true);
+    expect(screen.queryByText('Saving…')).toBeNull();
+    expect(screen.getByText(/Allowed/)).toBeTruthy();
+    expect((screen.getByTestId('allow-tool-project') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('says so when the switch did not save, instead of retrying into the same card', async () => {
+    // The store's setters report a failed PATCH by returning false, not by
+    // throwing; treating that as success asked the question again.
+    setRuns.mockResolvedValueOnce(false as never);
+    const onAllowed = vi.fn();
+    render(
+      <PermissionCard call={held({ tool: 'start_app_stack', grantScope: 'runs' })} onAllowed={onAllowed} />,
+    );
+    await user().click(screen.getByTestId('allow-tool-project'));
+    await waitFor(() => expect(screen.getByText(/did not save/)).toBeTruthy());
+    expect(onAllowed).not.toHaveBeenCalled();
   });
 
   it('says what the project rung turns on, in words', () => {

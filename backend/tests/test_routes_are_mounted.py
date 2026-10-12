@@ -91,6 +91,9 @@ def test_route_is_reachable(client: TestClient, path: str) -> None:
         ("POST", "/egress/killswitch"),
         ("POST", "/routing/preference"),
         ("POST", "/tools/servers"),
+        # Photographs for a page the model described: a complete, tested
+        # router in `packs/photos` that would answer 404 if never included.
+        ("POST", "/photos/find"),
         # DELETE /tools/servers/{id} is deliberately absent. Its correct answer
         # for an unknown id *is* 404, so this check -- whose entire premise is
         # that 404 means unmounted -- cannot tell the two apart. It is covered

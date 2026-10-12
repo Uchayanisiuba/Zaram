@@ -33,7 +33,7 @@
  * it is known. CLAUDE.md: *"Never render invented values."*
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { MessageSquare, Pin, PinOff, Search, Trash2, X } from 'lucide-react';
+import { ImageOff, MessageSquare, Pin, PinOff, Search, Trash2, X } from 'lucide-react';
 
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useChatStore } from '@/stores/chatStore';
@@ -41,9 +41,11 @@ import {
   deleteConversation,
   fetchConversations,
   pinConversation,
+  removeConversationPictures,
   searchConversations,
   type ConversationSummary,
 } from '@/services/conversationsClient';
+import { usePictureStore } from '@/stores/pictureStore';
 import { useProjectStore } from '@/stores/projectStore';
 
 /** Long enough that crossing the edge does not open it; short enough that
@@ -268,6 +270,27 @@ export default function HistoryPanel() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That conversation could not be deleted.');
+    }
+  };
+
+  /** Remove the pictures kept with one conversation and keep the conversation.
+   *  How a person shortens how long Zaram holds the photographs they attached;
+   *  a page that used one then shows the "no longer attached" placeholder. */
+  const onRemovePictures = async (id: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    try {
+      const { removed } = await removeConversationPictures(id);
+      setNote(
+        removed > 0
+          ? `Removed ${removed} ${removed === 1 ? 'picture' : 'pictures'} kept with that conversation. ` +
+              'Its pages show a grey placeholder where they were.'
+          : 'No pictures were kept with that conversation.',
+      );
+      // A page on screen was holding the bytes it fetched; let go of them so
+      // the removal shows rather than waiting for the next reload.
+      if (id === currentId) usePictureStore.setState({ held: {} });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Those pictures could not be removed.');
     }
   };
 
@@ -561,6 +584,16 @@ export default function HistoryPanel() {
                         ) : (
                           <PinOff size={11} style={{ color: 'var(--color-text-faint)' }} />
                         )}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Remove the pictures kept with ${row.title || 'this conversation'}`}
+                        title="Remove the pictures kept with this conversation"
+                        data-testid={`remove-pictures-${row.id}`}
+                        className="opacity-0 group-hover:opacity-100 focus:opacity-100"
+                        onClick={(e) => void onRemovePictures(row.id, e)}
+                      >
+                        <ImageOff size={11} style={{ color: 'var(--color-text-faint)' }} />
                       </button>
                       <button
                         type="button"

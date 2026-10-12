@@ -157,6 +157,93 @@ def _strings(value: Any) -> List[str]:
     return []
 
 
+# ------------------------------------------------------------------ pictures
+#
+# A picture is named, never carried. The model is told which pictures the person
+# attached by file name (`attachments/pictures.py`) and may answer with one of
+# those names in a field -- an invoice's `logo`, a CV's `photo`, a slide's
+# `image`. The bytes are read afterwards, on this machine, by the documents
+# runtime. Spreadsheets and charts have no such field: a spreadsheet is cells and
+# a chart is drawn from data, so there is nowhere a picture belongs and none is
+# offered.
+
+#: Words that mean the person asked for a picture to be placed. Used only to
+#: decide whether a name the model chose was *asked for*: a screenshot attached
+#: so a vision model could read it is not a logo, however eager the extractor.
+_ASKS_FOR_A_PICTURE = re.compile(
+    r"\b(logo|photo|photograph|picture|image|headshot|portrait|pic|screenshot|"
+    r"passport|selfie|artwork|illustration|diagram|chart|graphic|figure|drawing|"
+    r"sketch|icon|banner|attachment|attached)s?\b",
+    re.IGNORECASE,
+)
+
+#: What a name is shown as when it has to be reported back. The model wrote it,
+#: so it is cleaned and bounded before it reaches a sentence the person reads.
+_NOT_SHOWN = re.compile(r"[^A-Za-z0-9._ -]+")
+
+
+def _picture_rules(names: Sequence[str], field_rule: str) -> str:
+    """The part of an extraction prompt that offers pictures. ``""`` for none.
+
+    Empty when nothing is attached, so a prompt for a conversation with no
+    pictures is exactly the prompt it always was.
+    """
+    if not names:
+        return ""
+    return (
+        "\nThe person attached these pictures, by exact file name: "
+        + ", ".join(names)
+        + ".\n"
+        + field_rule
+        + "\nWrite a name from that list exactly as it is written there, or null. "
+        "Never write a path, a web address or any other name. Use null unless the "
+        "request or the text asks for a picture to go there.\n"
+    )
+
+
+def chosen_picture(
+    raw: Any,
+    names: Sequence[str],
+    *,
+    request: str,
+    answer: str,
+    left_out: List[str],
+) -> str:
+    """The attached picture the model named, or ``""``.
+
+    Three outcomes, and only one of them is a picture:
+
+    * nothing was named -- ``""``, and nothing to report;
+    * a name that is not one of ``names`` -- ``""``, **and reported**. The model
+      wrote something the person never attached, and a document with no picture
+      and a sentence saying why is the honest result (rule 9); a guessed picture
+      or a silent gap is not;
+    * a name that is held but was never asked for -- ``""`` without a report. The
+      person attached a receipt so a vision model could read it, and the
+      extractor reaching for it as a logo is not something they requested. The
+      name has to appear in the request or the text, or the request has to ask
+      for a picture in words.
+    """
+    if raw is None or isinstance(raw, bool) or not str(raw).strip():
+        return ""
+    wanted = str(raw).strip()
+    if wanted.lower() in ("null", "none", "n/a"):
+        return ""
+    held = {n.lower(): n for n in names}
+    name = held.get(wanted.lower())
+    if name is None:
+        shown = _NOT_SHOWN.sub("", wanted)[:60] or "that"
+        left_out.append(
+            f'"{shown}" is not one of the pictures you attached, so it was left out.'
+        )
+        return ""
+    said = f"{request}\n{answer}".lower()
+    if name.lower() not in said and not _ASKS_FOR_A_PICTURE.search(request or ""):
+        logger.info("picture %r was chosen but never asked for; left out", name)
+        return ""
+    return name
+
+
 # ------------------------------------------------------------------- invoice
 
 
@@ -169,6 +256,11 @@ class InvoiceDraft:
     currency: str = ""
     terms_days: Optional[int] = None
     notes: str = ""
+    #: The name of an attached picture to print as the logo, or ``""``. A name
+    #: only; the runtime resolves it against what the conversation holds.
+    logo: str = ""
+    #: What could not be done about pictures, phrased for the person.
+    left_out: List[str] = field(default_factory=list)
 
 
 _INVOICE_PROMPT = """Read the text below and extract the invoice details.
@@ -191,7 +283,7 @@ Rules:
 - Do not compute totals. Do not add a subtotal line to items.
 - Anything the text does not state is null. Never invent a client or a price.
 - terms_days is a whole number of days, or null if payment terms are not given.
-
+{pictures}
 The request was:
 {request}
 
@@ -199,16 +291,34 @@ The text:
 {answer}
 """
 
+_INVOICE_PICTURE = (
+    'Add one more field to the JSON, "logo": the picture to print as the logo at '
+    "the top of the invoice."
+)
 
-def invoice_from(answer: str, request: str, ask: Ask) -> InvoiceDraft | Missing:
+
+def invoice_from(
+    answer: str, request: str, ask: Ask, pictures: Sequence[str] = ()
+) -> InvoiceDraft | Missing:
     """Line items and who they are for, read out of an answer.
 
     Returns `Missing` naming the gaps rather than an invoice with holes in it.
     The two fields that make an invoice an invoice are the line items and who
     it bills, so those are the two it insists on.
+
+    ``pictures`` are the file names of the pictures the person attached. A logo
+    is optional, so a name that cannot be used never refuses the invoice -- it
+    is left out and reported on the draft.
     """
     try:
-        reply = ask(_INVOICE_PROMPT.format(request=request, answer=answer), _SYSTEM)
+        reply = ask(
+            _INVOICE_PROMPT.format(
+                request=request,
+                answer=answer,
+                pictures=_picture_rules(pictures, _INVOICE_PICTURE),
+            ),
+            _SYSTEM,
+        )
     except Exception as exc:
         logger.warning("invoice extraction failed: %s", exc)
         return Missing(["the details — I couldn't read them back from what we discussed"])
@@ -250,12 +360,23 @@ def invoice_from(answer: str, request: str, ask: Ask) -> InvoiceDraft | Missing:
     terms = parsed.get("terms_days")
     terms_days = int(terms) if isinstance(terms, (int, float)) and not isinstance(terms, bool) else None
 
+    left_out: List[str] = []
+    logo = chosen_picture(
+        parsed.get("logo") if pictures else None,
+        pictures,
+        request=request,
+        answer=answer,
+        left_out=left_out,
+    )
+
     return InvoiceDraft(
         items=items,
         bill_to=bill_to,
         currency=str(parsed.get("currency") or "").strip(),
         terms_days=terms_days,
         notes=str(parsed.get("notes") or "").strip(),
+        logo=logo,
+        left_out=left_out,
     )
 
 
@@ -327,6 +448,12 @@ def table_from(answer: str, request: str, ask: Ask) -> TableDraft | Missing:
 @dataclass
 class DeckDraft:
     slides: List[tuple[str, List[str]]]
+    #: Slide index -> the name of the attached picture that goes on it. Kept
+    #: beside `slides` rather than inside the tuples so every caller that
+    #: unpacks `(heading, bullets)` goes on working.
+    images: Dict[int, str] = field(default_factory=dict)
+    #: What could not be done about pictures, phrased for the person.
+    left_out: List[str] = field(default_factory=list)
 
 
 _DECK_PROMPT = """Turn the text below into a slide outline.
@@ -338,7 +465,7 @@ Rules:
 - Use only what the text says. Never add a slide about something absent.
 - Bullets are short phrases, not paragraphs.
 - Between 2 and 12 slides.
-
+{pictures}
 The request was:
 {request}
 
@@ -346,16 +473,33 @@ The text:
 {answer}
 """
 
+_DECK_PICTURE = (
+    'A slide may carry one more field, "image": the picture that belongs on that '
+    "slide. Leave it out of every slide that has no picture."
+)
 
-def deck_from(answer: str, request: str, ask: Ask) -> DeckDraft | Missing:
+
+def deck_from(
+    answer: str, request: str, ask: Ask, pictures: Sequence[str] = ()
+) -> DeckDraft | Missing:
     """An outline, one heading per slide.
 
     The loosest of the three, and legitimately so: a deck *is* a restatement of
     prose, so nothing here can be invented that was not already in the answer.
     An invoice is different in kind — its numbers are claims about money.
+
+    ``pictures`` are the attached pictures' file names; a slide's ``image`` may
+    be one of them. One that is not is left out and reported.
     """
     try:
-        reply = ask(_DECK_PROMPT.format(request=request, answer=answer), _SYSTEM)
+        reply = ask(
+            _DECK_PROMPT.format(
+                request=request,
+                answer=answer,
+                pictures=_picture_rules(pictures, _DECK_PICTURE),
+            ),
+            _SYSTEM,
+        )
     except Exception as exc:
         logger.warning("deck extraction failed: %s", exc)
         return Missing(["enough structure to make slides from"])
@@ -365,6 +509,8 @@ def deck_from(answer: str, request: str, ask: Ask) -> DeckDraft | Missing:
         return Missing()
 
     slides: List[tuple[str, List[str]]] = []
+    images: Dict[int, str] = {}
+    left_out: List[str] = []
     for raw in parsed.get("slides") or []:
         if not isinstance(raw, dict):
             continue
@@ -372,11 +518,21 @@ def deck_from(answer: str, request: str, ask: Ask) -> DeckDraft | Missing:
         bullets = _strings(raw.get("bullets"))
         if not heading:
             continue
+        if pictures:
+            image = chosen_picture(
+                raw.get("image"),
+                pictures,
+                request=request,
+                answer=answer,
+                left_out=left_out,
+            )
+            if image:
+                images[len(slides)] = image
         slides.append((heading, bullets))
 
     if not slides:
         return Missing(["enough structure to make slides from"])
-    return DeckDraft(slides=slides)
+    return DeckDraft(slides=slides, images=images, left_out=left_out)
 
 
 @dataclass
@@ -411,7 +567,18 @@ class CvDraft:
     experience: List[CvEntry] = field(default_factory=list)
     education: List[CvEntry] = field(default_factory=list)
     skills: List[str] = field(default_factory=list)
+    #: The name of an attached picture to print as the person's photo, or
+    #: ``""``. Optional: a photo on a CV is the norm in some countries and
+    #: unwelcome in others, so it is only ever placed when asked for.
+    photo: str = ""
+    #: What could not be done about pictures, phrased for the person.
+    left_out: List[str] = field(default_factory=list)
 
+
+_CV_PICTURE = (
+    'Add one more field to the JSON, "photo": the picture of the person to print '
+    "at the top of the CV."
+)
 
 _CV_PROMPT = """Read the text below into the fields of a CV.
 
@@ -432,7 +599,7 @@ Rules:
 - Leave a field out entirely rather than filling it with a guess.
 - Dates exactly as the text gives them. Do not normalise or complete them.
 - Most recent first.
-
+{pictures}
 The request was:
 {request}
 
@@ -466,7 +633,9 @@ def _entries(value: Any) -> List[CvEntry]:
     return entries
 
 
-def cv_from(answer: str, request: str, ask: Ask) -> CvDraft | Missing:
+def cv_from(
+    answer: str, request: str, ask: Ask, pictures: Sequence[str] = ()
+) -> CvDraft | Missing:
     """A CV read into fields, or a refusal naming what was not there.
 
     **Rule 9 applies here about as hard as it does to an invoice.** A CV is a
@@ -477,9 +646,19 @@ def cv_from(answer: str, request: str, ask: Ask) -> CvDraft | Missing:
 
     So there is no prose fallback and no completion of a partial date. What was
     not in the text does not appear in the file.
+
+    ``pictures`` are the attached pictures' file names; ``photo`` may be one of
+    them. One that is not is left out and reported, never guessed at.
     """
     try:
-        reply = ask(_CV_PROMPT.format(request=request, answer=answer), _SYSTEM)
+        reply = ask(
+            _CV_PROMPT.format(
+                request=request,
+                answer=answer,
+                pictures=_picture_rules(pictures, _CV_PICTURE),
+            ),
+            _SYSTEM,
+        )
     except Exception as exc:
         logger.warning("cv extraction failed: %s", exc)
         return Missing(["the details of the CV"])
@@ -504,6 +683,14 @@ def cv_from(answer: str, request: str, ask: Ask) -> CvDraft | Missing:
         education=_entries(parsed.get("education")),
         skills=_strings(parsed.get("skills")),
     )
+    if pictures:
+        draft.photo = chosen_picture(
+            parsed.get("photo"),
+            pictures,
+            request=request,
+            answer=answer,
+            left_out=draft.left_out,
+        )
 
     if not (draft.experience or draft.education or draft.summary):
         return Missing(["anything to put on the CV"])

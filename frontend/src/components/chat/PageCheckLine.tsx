@@ -35,6 +35,17 @@ export default function PageCheckLine({ reply }: { reply: string }) {
     default:
       text = `Not checked: ${state.note || 'it could not be run'}.`;
   }
+  // Said rather than done silently: the page the person runs is not quite the
+  // text the model wrote, and they should know in what way.
+  const before: string[] = [];
+  if (state.starter) before.push(`Built on Zaram's tested ${state.starter} starting point.`);
+  if (state.repaired?.length) {
+    const n = state.repaired.length;
+    before.push(`Zaram put back ${n === 1 ? 'a' : n} missing ${n === 1 ? 'step' : 'steps'} (\`++\`) in ${n === 1 ? 'a loop' : 'loops'} the model wrote.`);
+  }
+  if (before.length) text = `${before.join(' ')} ${text}`;
+  // Pictures the person attached that the page names but could not be given.
+  if (state.pictures?.length) text = `${text} ${state.pictures.join(' ')}`;
 
   return (
     <p

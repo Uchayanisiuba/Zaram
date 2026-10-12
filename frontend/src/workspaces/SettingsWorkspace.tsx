@@ -43,6 +43,7 @@ import PairingOffer from '@/components/settings/PairingOffer';
 const PAIRED = new Set(['nvidia_nim', 'openrouter', 'groq']);
 import LetterheadSection from '../components/settings/LetterheadSection';
 import ToolsSection from '../components/settings/ToolsSection';
+import ComputerUseSection from '../components/settings/ComputerUseSection';
 import RunsOnItsOwnSection from '../components/settings/RunsOnItsOwnSection';
 import ReportSection from '../components/settings/ReportSection';
 import ManualReader from '../components/settings/ManualReader';
@@ -71,6 +72,9 @@ import {
   Link2,
   LifeBuoy,
   Clock,
+  Monitor,
+  Star,
+  Info,
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import AdvancedModelField from '../components/settings/AdvancedModelField';
@@ -112,6 +116,12 @@ import {
   setSearchScope,
   setWebSearch,
   updateRoutingSettings,
+  fetchTierStatus,
+  selectTier,
+  enableAutoTier,
+  fetchHardwareProfile,
+  fetchCacheStatus,
+  cleanupVoiceCache,
   type CatalogueProvider,
   type CloudStatus,
   type DiscoveredModel,
@@ -121,6 +131,11 @@ import {
   type RoutingPreference,
   type RoutingSettings,
   type WebSearchStatus,
+  type TierStatus,
+  type HardwareProfile,
+  type CleanupReport,
+  type VoiceTier,
+  type CacheStatus,
 } from '@/services/settingsClient';
 import { pastedKey } from '@/lib/pastedKey';
 import ModelSearchList from '@/components/settings/ModelSearchList';
@@ -515,6 +530,38 @@ export function groupModelsByLocality(models: DiscoveredModel[]): ModelGroup[] {
   return groups;
 }
 
+function tierLabel(tier: string): string {
+  const labels: Record<string, string> = {
+    'TIER_1_BREEZE': 'Tier 1: Breeze TTS 2 (Cloud Premium)',
+    'TIER_2_CHATTERBOX': 'Tier 2: Chatterbox Turbo (GPU Efficient)',
+    'TIER_3_QWEN3': 'Tier 3: Qwen3-TTS (CPU Lightweight)',
+    'TIER_4_KOKORO': 'Tier 4: Kokoro 82M (Fallback)',
+  };
+  return labels[tier] || tier;
+}
+
+function tierShortLabel(tier: string): string {
+  const labels: Record<string, string> = {
+    'TIER_1_BREEZE': 'Breeze',
+    'TIER_2_CHATTERBOX': 'Chatterbox',
+    'TIER_3_QWEN3': 'Qwen3',
+    'TIER_4_KOKORO': 'Kokoro',
+  };
+  return labels[tier] || tier;
+}
+
+function tierColor(tier: string): string {
+  const colors: Record<string, string> = {
+    'TIER_1_BREEZE': 'var(--color-purple)',
+    'TIER_2_CHATTERBOX': 'var(--color-cyan)',
+    'TIER_3_QWEN3': 'var(--color-green)',
+    'TIER_4_KOKORO': 'var(--color-amber)',
+  };
+  return colors[tier] || 'var(--color-text-muted)';
+}
+
+const tierOrder: VoiceTier[] = ['TIER_1_BREEZE', 'TIER_2_CHATTERBOX', 'TIER_3_QWEN3', 'TIER_4_KOKORO'];
+
 export default function SettingsWorkspace() {
   const [manualOpen, setManualOpen] = useState(false);
   const backendOnline = useSystemStore((s) => s.backendOnline);
@@ -551,6 +598,17 @@ export default function SettingsWorkspace() {
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [mannerDraft, setMannerDraft] = useState<string | null>(null);
 
+  // Tier / voice engine state
+  const [tierStatus, setTierStatus] = useState<TierStatus | null>(null);
+  // How many speech engines can actually speak, read off the tier table's `implemented`.
+  // One means there is no choice to offer, and the section says so instead.
+  const onlyOneEngine =
+    tierOrder.filter((tier) => tierStatus?.tier_status?.[tier]?.implemented !== false).length <= 1;
+  const [hardwareProfile, setHardwareProfile] = useState<HardwareProfile | null>(null);
+  const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
+  const [cleanupReport, setCleanupReport] = useState<CleanupReport | null>(null);
+  const [tierBusy, setTierBusy] = useState<string | null>(null);
+
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -584,7 +642,7 @@ export default function SettingsWorkspace() {
   const loadLocalState = useCallback(async () => {
     setError(null);
 
-    const [cat, cloudStatus, routingState, kill, egressPolicy, webSearch, manifest, imagesRead] =
+    const [cat, cloudStatus, routingState, kill, egressPolicy, webSearch, manifest, imagesRead, tier, hardware, cache] =
       await Promise.allSettled([
         fetchProviderCatalogue(),
         fetchCloudStatus(),
@@ -596,6 +654,9 @@ export default function SettingsWorkspace() {
         // call, so rule 7g does not apply and it can run on mount.
         fetchExportManifest(),
         fetchImageSetting(),
+        fetchTierStatus(),
+        fetchHardwareProfile(),
+        fetchCacheStatus(),
       ]);
 
     if (cat.status === 'fulfilled') {
@@ -609,6 +670,9 @@ export default function SettingsWorkspace() {
     if (webSearch.status === 'fulfilled') setSearch(webSearch.value);
     if (manifest.status === 'fulfilled') setExportManifest(manifest.value);
     if (imagesRead.status === 'fulfilled') setImageSettingState(imagesRead.value);
+    if (tier.status === 'fulfilled') setTierStatus(tier.value);
+    if (hardware.status === 'fulfilled') setHardwareProfile(hardware.value);
+    if (cache.status === 'fulfilled') setCacheStatus(cache.value);
 
     // Named, and only the ones that actually failed. "Something went wrong"
     // over a screen that is now half-populated is worse than either a working
@@ -620,6 +684,9 @@ export default function SettingsWorkspace() {
       ['kill switch', kill],
       ['per-source rules', egressPolicy],
       ['web search', webSearch],
+      ['tier status', tier],
+      ['hardware profile', hardware],
+      ['voice cache', cache],
     ] as const;
     const broken = failures.filter(([, r]) => r.status === 'rejected');
     if (broken.length > 0) {
@@ -671,6 +738,53 @@ export default function SettingsWorkspace() {
       setError(messageOf(err));
     } finally {
       setBusy(null);
+    }
+  };
+
+  const recommendedTier = tierStatus && tierStatus.tier_status
+    ? tierOrder.find(t => tierStatus.tier_status[t]?.eligible) ?? null
+    : null;
+
+  const selectTierManually = async (tier: VoiceTier) => {
+    setTierBusy(`tier:${tier}`);
+    setError(null);
+    try {
+      const result = await selectTier(tier);
+      setTierStatus(prev => prev ? { ...prev, active_tier: result.selected_tier, auto_tier_enabled: false } : null);
+      await loadLocalState();
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setTierBusy(null);
+    }
+  };
+
+  const reenableAutoTier = async () => {
+    setTierBusy('tier:auto');
+    setError(null);
+    try {
+      const result = await enableAutoTier();
+      setTierStatus(prev => prev ? { ...prev, active_tier: result.selected_tier, auto_tier_enabled: true } : null);
+      await loadLocalState();
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setTierBusy(null);
+    }
+  };
+
+  const handleCleanup = async () => {
+    setTierBusy('cleanup');
+    setError(null);
+    try {
+      // Empty: the backend keeps the voice that speaks now.
+      const report = await cleanupVoiceCache('', false);
+      setCleanupReport(report);
+      await loadLocalState();
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setTierBusy(null);
     }
   };
 
@@ -1923,6 +2037,17 @@ export default function SettingsWorkspace() {
           <ToolsSection Row={Row} />
         </Section>
 
+        {/* ----------------------------------------------------- Computer Use */}
+        {/* Desktop automation via cua-driver. Configured alongside Tools because
+            it uses the same MCP infrastructure but has platform-specific
+            permissions and quick actions. */}
+        <Section
+          title="Computer Use"
+          icon={<Monitor size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          <ComputerUseSection Row={Row} />
+        </Section>
+
         {/* ------------------------------------------------ Runs on its own */}
         {/* Coworker step 4. Configured beside Tools because it is the same
             kind of thing — what Zaram may do without a person typing — and
@@ -2154,6 +2279,141 @@ export default function SettingsWorkspace() {
                   />
                 </div>
               )}
+</>
+              )}
+            </Section>
+
+        {/* ---------------------------------------------------- Voice Engine (Tiers) */}
+        <Section title="Voice Engine" icon={<Cpu size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
+          {tierStatus && (
+            <>
+              {/* Tier Status & Selection */}
+              <Row
+                label="Active Engine"
+                value={tierStatus.active_tier ? tierLabel(tierStatus.active_tier) : 'unknown'}
+                state="good"
+                detail={
+                  onlyOneEngine
+                    ? 'Kokoro is the only speech engine built, so it is the one that speaks. The others are ' +
+                      'listed so you can see what is planned; none of them can speak yet.'
+                    : tierStatus.auto_tier_enabled
+                      ? 'Zaram picks the best engine for your hardware. You can override below.'
+                      : 'Manual selection active. Re-enable auto to let Zaram pick again.'
+                }
+              >
+                <div className="flex flex-col gap-2">
+                  {/* Tier badges */}
+                  {tierStatus.tier_status && (
+                    <div className="flex flex-wrap gap-2">
+                      {tierOrder.map((tierKey) => {
+                        const status = tierStatus.tier_status[tierKey];
+                        const isActive = tierKey === tierStatus.active_tier;
+                        const isEligible = status?.eligible ?? false;
+                        const isRecommended = tierKey === recommendedTier;
+                        return (
+                          <span
+                            key={tierKey}
+                            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium"
+                            style={{
+                              background: isEligible ? `${tierColor(tierKey)}20` : 'var(--color-glass)',
+                              color: isEligible ? tierColor(tierKey) : 'var(--color-text-faint)',
+                              border: isActive ? `1px solid ${tierColor(tierKey)}` : isEligible ? '1px solid transparent' : '1px dashed var(--color-border)',
+                              opacity: isEligible ? 1 : 0.6,
+                              cursor: isEligible && !isActive ? 'pointer' : 'default',
+                            }}
+                            onClick={isEligible && !isActive ? () => selectTierManually(tierKey as VoiceTier) : undefined}
+                            title={isEligible ? (isRecommended ? 'Recommended for your hardware' : 'Click to select') : status?.reason || 'Not eligible for your hardware'}
+                          >
+                            {isActive && <span className="text-[8px]">● </span>}
+                            {isRecommended && <Star size={9} className="text-[8px]" aria-label="Recommended" />}
+                            {tierShortLabel(tierKey)}
+                            {!isEligible && <AlertTriangle size={9} aria-label="Not eligible" />}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Auto/Manual toggle -- only when there is more than one engine to choose
+                      between. With one, "Manual selection active" described a choice nobody
+                      made and an "Auto" that had nothing to pick. */}
+                  {!onlyOneEngine && (
+                  <div className="flex items-center gap-2">
+                    <Segmented<'auto' | 'manual'>
+                      options={[
+                        { value: 'auto', label: 'Auto (recommended)' },
+                        { value: 'manual', label: 'Manual' },
+                      ]}
+                      value={tierStatus.auto_tier_enabled ? 'auto' : 'manual'}
+                      onChange={(next) => next === 'auto' ? reenableAutoTier() : undefined}
+                      disabled={!tierStatus.auto_tier_enabled && tierBusy !== null}
+                    />
+                    {tierStatus.auto_tier_enabled === false && tierStatus.fallback_tier && (
+                      <span className="text-xs text-slate-500">
+                        Fallback: {tierLabel(tierStatus.fallback_tier)}
+                      </span>
+                    )}
+                  </div>
+                  )}
+
+                  {!onlyOneEngine && recommendedTier && recommendedTier !== tierStatus.active_tier && (
+                    <p className="text-xs text-slate-500">
+                      <Info size={11} className="inline mr-1" style={{ color: 'var(--color-cyan)', verticalAlign: 'middle' }} />
+                      Recommended for your hardware: <strong>{tierLabel(recommendedTier)}</strong>.
+                    </p>
+                  )}
+                </div>
+              </Row>
+
+              {/* Hardware Profile */}
+              {hardwareProfile && (
+                <details className="mt-2">
+                  <summary className="text-xs cursor-pointer" style={{ color: 'var(--color-text-muted)' }}>
+                    Hardware Profile (for tier routing)
+                  </summary>
+                  <div className="mt-2 p-2 text-[10px] font-mono" style={{ background: 'var(--color-glass)', border: '1px solid var(--color-border)', borderRadius: '4px' }}>
+                    <div>GPU: {hardwareProfile.gpu_name} ({hardwareProfile.gpu_vendor})</div>
+                    {hardwareProfile.total_vram_gb !== null && (
+                      <div>VRAM: {hardwareProfile.total_vram_gb} GB total, {hardwareProfile.free_vram_gb ?? '?'} GB free</div>
+                    )}
+                    {hardwareProfile.total_system_ram_gb !== null && (
+                      <div>System RAM: {hardwareProfile.total_system_ram_gb} GB</div>
+                    )}
+                    <div>Cloud LLM: {hardwareProfile.cloud_llm_active ? `Yes (${hardwareProfile.cloud_llm_provider})` : 'No'}</div>
+                    <div>Local LLM: {hardwareProfile.local_llm_active ? `Yes (${hardwareProfile.local_llm_model_id}, ~${hardwareProfile.local_llm_vram_footprint_gb ?? '?'} GB VRAM)` : 'No'}</div>
+                  </div>
+                </details>
+              )}
+
+              {/* Voice Cache Cleanup (Kokoro only) */}
+              {tierStatus.active_tier === 'TIER_4_KOKORO' && cacheStatus && (
+                <Row
+                  label="Local Voice Cleanup"
+                  state="good"
+                  detail={
+                    'Deletes the downloaded Kokoro voices you are not using, keeping the one that speaks now, to reclaim disk space. ' +
+                    (cacheStatus.deletable_voices > 0
+                      ? `Currently ${cacheStatus.deletable_voices} voices (${cacheStatus.deletable_size_mb} MB) can be removed.`
+                      : 'No unused voices to clean.')
+                  }
+                >
+                  <div className="flex items-center gap-2">
+                    <Button
+                      busy={tierBusy === 'cleanup'}
+                      onClick={handleCleanup}
+                      disabled={cacheStatus.deletable_voices === 0 || tierBusy !== null}
+                    >
+                      <Trash2 size={12} />
+                      {tierBusy === 'cleanup' ? 'Cleaning...' : `Remove ${cacheStatus.deletable_voices} Unused Voices`}
+                    </Button>
+                    {cleanupReport && (
+                      <span className="text-xs text-slate-500">
+                        Last run: removed {cleanupReport.deleted_count} files, freed {cleanupReport.freed_mb} MB.
+                      </span>
+                    )}
+                  </div>
+                </Row>
+              )}
             </>
           )}
         </Section>
@@ -2197,8 +2457,8 @@ export default function SettingsWorkspace() {
             label="The manual"
             state="good"
             detail={
-              'How Zaram works, in ten short pages: memory, what leaves your computer, documents, ' +
-              'pictures, voice, packs, tools, and what to do when something goes wrong. The same pages ' +
+              'How Zaram works, in twelve short pages: memory, what leaves your computer, documents, ' +
+              'pictures, voices, packs, tools, computer use, and what to do when something goes wrong. The same pages ' +
               'live in the Zaram domain under Knowledge, so you can also just ask.'
             }
           >

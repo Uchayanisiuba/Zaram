@@ -54,6 +54,8 @@ files:
   # domain at start and shown under Settings → Help.
   - backend/manual/zaram-manual/*.md
   - backend/manual/assets/*
+  # Tested starting points a page request can build on (`backend/starters`).
+  - backend/starters/*.html
 
   # Never, whatever matched above. Ordered after the includes deliberately.
   - "!backend/venv"        # the developer's virtualenv, 376 MB
@@ -128,6 +130,12 @@ files:
   # `.gguf`, `.bin`, `.pt` and `.onnx` beside it, because "the weights are not
   # in the installer" must not depend on which format somebody drops in next.
   - "!backend/models"
+  # Programs the person installed through Zaram -- cua-driver, from Settings ->
+  # Computer Use -- land in `data_dir()/bin`, which in a checkout is
+  # `backend/bin`. Somebody else's signed binaries, fetched and checked against
+  # a pinned fingerprint on the person's own machine: never ours to carry, and
+  # an installer that shipped them would be redistributing a vendor's build.
+  - "!backend/bin"
 
   - "!**/__pycache__"
   - "!**/*.pyc"

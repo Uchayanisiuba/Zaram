@@ -20,9 +20,11 @@ import {
   type ImageProgress,
   type TokenUsage,
   type ChatTiming,
+  type ToolPlace,
 } from '@/services/chatClient';
 import { listArtifacts, type Artifact } from '@/services/artifactsClient';
 import { stripCitationMarkers } from '@/lib/markers';
+import { openStartedApp } from '@/lib/openStartedApp';
 import { useSystemStore } from '@/stores/systemStore';
 import { useSessionStatusStore } from '@/stores/sessionStatusStore';
 import { useEmbodimentStore } from '@/stores/embodimentStore';
@@ -42,6 +44,10 @@ export interface SentAttachment {
   id: string;
   name: string;
   kind: string;
+  /** For a picture: the name the model was told, so a page that uses it can
+   *  be given the picture (`lib/pagePictures.ts`). A conversation keeps its
+   *  pictures, so this comes back with it when it is opened from History. */
+  pageName?: string;
 }
 
 export interface ChatMessage {
@@ -169,6 +175,8 @@ export interface ChatToolCall {
    *  Settings. Absent when the server has no opinion, and the card then
    *  shows one rung fewer rather than a control that settles nothing. */
   grantScope?: string;
+  /** Whether Zaram ships the server — then no *Always* is offered. */
+  builtin?: boolean;
   /** On a `confirm`: the task this call was parked on, and whether *Run
    *  this once* may be offered. See `ChatEvent`. */
   heldTask?: string;
@@ -223,6 +231,11 @@ interface ChatState {
    *  generation is buffered — the marker cannot be recognised mid-token — so
    *  these are the only thing on screen while the model reads. */
   streamingToolCalls: ChatToolCall[];
+  /** A place a Zaram settings tool asked to open ("open Settings"), waiting
+   *  for the conversation view, which owns navigation, to go there and clear
+   *  it. `null` when nothing is asked. */
+  requestedPlace: ToolPlace | null;
+  clearRequestedPlace: () => void;
   /** The checklist as it stands while the reply is in flight. */
   streamingPlan: ChatPlan | null;
   /** How far through drawing a picture the machine is, or `null`.
@@ -483,6 +496,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingArtifacts: [],
   streamingNotices: [],
   streamingToolCalls: [],
+  requestedPlace: null,
+  clearRequestedPlace: () => set({ requestedPlace: null }),
   streamingPlan: null,
   streamingImageProgress: null,
   streamingAnsweredBy: null,
@@ -788,6 +803,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...(event.appUrl ? { appUrl: event.appUrl } : {}),
               ...(event.grantable ? { grantable: true } : {}),
               ...(event.grantScope ? { grantScope: event.grantScope } : {}),
+              ...(event.builtin ? { builtin: true } : {}),
               ...(event.heldTask ? { heldTask: event.heldTask } : {}),
               ...(event.once ? { once: true } : {}),
               ...(event.stepId ? { stepId: event.stepId } : {}),
@@ -796,6 +812,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...(event.planStep != null ? { planStep: event.planStep } : {}),
             });
             set({ streamingToolCalls: [...toolCalls] });
+            // **A change the person asked Zaram to make to its own window.**
+            // Applied when it ran, and only from the live stream -- a reply
+            // read back from history must not switch the indicator again.
+            if (event.verdict === 'allow' && event.apply) {
+              if (event.apply.renderer) useEmbodimentStore.getState().setRenderer(event.apply.renderer);
+              if (event.apply.open) set({ requestedPlace: event.apply.open });
+            }
+            // **An app this reply just started opens in Zaram's own pane.**
+            // From the live stream only, for the same reason as above; the
+            // guards (local address, code pack, waits for an answer) are in
+            // `openStartedApp`.
+            void openStartedApp({
+              server: event.server,
+              tool: event.tool,
+              verdict: event.verdict,
+              appUrl: event.appUrl,
+            });
             break;
           }
 
@@ -1143,6 +1176,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // card makes with `exists`.
           artifacts: m.artifactIds.map((id) => byId.get(id)).filter((a): a is Artifact => !!a),
           notices: [],
+          // The pictures that went with a question, by the names the model was
+          // told -- so a page it wrote can be given them again. The bytes are
+          // not here; `pictureStore` fetches the kept copy when a page uses one.
+          ...(m.role === 'user' && m.attachments?.length
+            ? {
+                attachments: m.attachments.map((a) => ({
+                  id: a.id,
+                  name: a.name,
+                  kind: a.kind,
+                  ...(a.pageName ? { pageName: a.pageName } : {}),
+                })),
+              }
+            : {}),
           ...(m.toolCalls.length ? { toolCalls: m.toolCalls } : {}),
           ...(m.plan ? { plan: m.plan } : {}),
           timestamp: m.createdAt * 1000,

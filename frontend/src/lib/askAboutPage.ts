@@ -57,7 +57,14 @@ export function describe(picked: PickedElement): string {
   return picked.selector.split(' > ').pop() || picked.tag;
 }
 
-const WHOLE_PAGE = 'Keep everything else as it is, and reply with the whole updated page in one ```html block.';
+/** How a change comes back: only what changes, as SEARCH/REPLACE edits the
+ *  window applies to the page (`pageEdits.ts`). Asked for 11 October 2026: the
+ *  whole page written again cost twenty minutes a change on a local model. */
+const AS_EDITS =
+  'Reply with only what changes, as SEARCH/REPLACE blocks (lines copied exactly from the page, then the lines that ' +
+  'replace them; name the file above each block when the page has several). Zaram applies them and runs the result.';
+
+const WHOLE_PAGE = `Keep everything else as it is. ${AS_EDITS}`;
 
 function part(picked: PickedElement): string {
   return [
@@ -89,9 +96,8 @@ export function checkFailedRequest(problems: readonly string[], several: boolean
     'Zaram ran this page before showing it, and it did not work:\n\n' +
     `${list}\n\n` +
     'Find the cause and fix it, checking every loop and every name the page uses. ' +
-    (several
-      ? 'Reply with every file again in full, each on a fence line with its name.'
-      : 'Reply with the whole page in one ```html block.')
+    (several ? `${AS_EDITS} ` : `${AS_EDITS.replace('; name the file above each block when the page has several', '')} `) +
+    'Write the page out in full only if most of it has to change.'
   );
 }
 
@@ -104,6 +110,6 @@ export function fixRequest(error: string, hosts: readonly string[] = []): string
         'use only three.js and its listed addons, or write it without a library.',
     );
   }
-  lines.push('Find the cause and fix it, then reply with the whole page in one ```html block.');
+  lines.push(`Find the cause and fix it. ${AS_EDITS}`);
   return lines.join('\n\n');
 }

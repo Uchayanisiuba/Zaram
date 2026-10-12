@@ -11,6 +11,7 @@
  * `composeOrbState` — so there is nothing left here to guard.
  */
 
+const CUASERVERS = ['cua-driver', 'cua'] as const;
 
 /** What chat activity alone would say. Sticky rules live in `codingActivity`. */
 export function chatActivity(isStreaming: boolean): 'thinking' | 'idle' {
@@ -65,4 +66,50 @@ export function codingActivity(
   if (base === 'idle') return base;
   if (toolServers.includes('code')) return 'coding';
   return OPENS_A_CODE_BLOCK.test(replySoFar ?? '') ? 'coding' : base;
+}
+
+/**
+ * `computer_use` when the work in hand is desktop automation via cua-driver.
+ *
+ * **Derived from what the system is doing, never from where it routed.** Same
+ * posture as `codingActivity` — this is about what Zaram is *doing*, not which
+ * model answered.
+ *
+ * Two things that are computer-use activity:
+ *
+ * - **the cua-driver tools ran.** A call to a `cua-driver` or `cua` server is
+ *   Zaram controlling the desktop, whatever model was asked.
+ * - **the reply is about computer use.** (Future: could detect from intent)
+ *
+ * Sticky for the rest of the reply, deliberately — same reasoning as coding.
+ */
+export function computerUseActivity(
+  isStreaming: boolean,
+  toolServers: readonly string[] = [],
+): 'computer_use' | 'thinking' | 'idle' {
+  const base = chatActivity(isStreaming);
+  if (base === 'idle') return base;
+  if (toolServers.some((s) => CUASERVERS.includes(s as typeof CUASERVERS[number]))) return 'computer_use';
+  return base;
+}
+
+/**
+ * Compose the primary activity from all sources.
+ * Priority: coding > computer_use > thinking > idle
+ */
+export function composeActivity(
+  isStreaming: boolean,
+  replySoFar: string,
+  toolServers: readonly string[] = [],
+): 'coding' | 'computer_use' | 'thinking' | 'idle' {
+  // Coding has highest priority (existing behavior)
+  const code = codingActivity(isStreaming, replySoFar, toolServers);
+  if (code === 'coding') return 'coding';
+
+  // Computer use next
+  const cua = computerUseActivity(isStreaming, toolServers);
+  if (cua === 'computer_use') return 'computer_use';
+
+  // Fall back to chat activity
+  return chatActivity(isStreaming);
 }

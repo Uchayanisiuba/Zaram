@@ -32,7 +32,9 @@ their own right — rule 4 is about the *fact* and the answers built on it, and
 that machinery lives where the fact does. Someone who wants the fact gone
 deletes the fact; someone who wants the transcript gone gets exactly that. Two
 different requests, and merging them silently makes a delete larger than it was
-asked to be. Artifacts likewise: a file generated during a conversation was
+asked to be. The pictures kept beside a conversation (`pictures.py`) do go with
+it -- they are part of the transcript, not a product of it -- and that removal
+is made by the delete route, which owns both. Artifacts likewise: a file generated during a conversation was
 written to the output directory and belongs to the user, not to a row here.
 """
 
@@ -125,6 +127,14 @@ class Message:
     #: corrected or deleted fact says so instead of showing provenance that no
     #: longer holds. See `conversations/citations.py`.
     sources: tuple = ()
+    #: The pictures that went with a **user** message: id, name, kind,
+    #: ``page_name`` and suffix of each -- never the bytes, which are kept
+    #: beside the conversation (`conversations/pictures.py`) and removable on
+    #: their own. This is what lets a conversation reopened tomorrow still know
+    #: that "photo-1.png" in a page it wrote was a picture, and which one.
+    #: Pictures only: a document someone attached is working state and its
+    #: text is not recorded here (rule 7d).
+    attachments: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -272,6 +282,9 @@ class ConversationRecords:
                 ("plan", "TEXT NOT NULL DEFAULT ''"),
                 ("artifact_ids", "TEXT NOT NULL DEFAULT '[]'"),
                 ("sources", "TEXT NOT NULL DEFAULT '[]'"),
+                # Pictures that went with a user message. Older rows get the
+                # empty list: what was attached then was never recorded.
+                ("attachments", "TEXT NOT NULL DEFAULT '[]'"),
             ):
                 if column not in message_columns:
                     conn.execute(
@@ -322,6 +335,7 @@ class ConversationRecords:
         plan: Optional[dict] = None,
         artifact_ids: Optional[Sequence[str]] = None,
         sources: Optional[Sequence[dict]] = None,
+        attachments: Optional[Sequence[dict]] = None,
     ) -> Message:
         """Add one message and bump the conversation's activity time.
 
@@ -363,12 +377,13 @@ class ConversationRecords:
                 plan=plan,
                 artifact_ids=tuple(artifact_ids or ()),
                 sources=tuple(sources or ()),
+                attachments=tuple(attachments or ()),
             )
             conn.execute(
                 "INSERT INTO messages "
                 "(id, conversation_id, seq, role, text, created_at, model, "
-                "locality, tool_calls, plan, artifact_ids, sources) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "locality, tool_calls, plan, artifact_ids, sources, attachments) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     message.id,
                     message.conversation_id,
@@ -382,6 +397,7 @@ class ConversationRecords:
                     _as_json(message.plan, "") if message.plan else "",
                     _as_json(list(message.artifact_ids), "[]"),
                     _as_json(list(message.sources), "[]"),
+                    _as_json(list(message.attachments), "[]"),
                 ),
             )
 
@@ -588,6 +604,7 @@ def _message_from(row: sqlite3.Row) -> Message:
         plan=_from_json(_column(row, "plan"), None),
         artifact_ids=tuple(_from_json(_column(row, "artifact_ids"), []) or []),
         sources=tuple(_from_json(_column(row, "sources"), []) or []),
+        attachments=tuple(_from_json(_column(row, "attachments"), []) or []),
     )
 
 

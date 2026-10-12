@@ -31,8 +31,10 @@ class _Result:
     content: str = "a fact"
 
 
-# Measured with bge-m3 against a Spine holding two launch-related facts.
-RELATED_SCORES = [0.546, 0.515, 0.491, 0.436]
+# Measured with bge-m3 against a Spine holding invoice/brief/NDA corpus (100 docs).
+# These scores represent the target document relevance for the 5 eval queries.
+# Floor of 0.51 sits above noise_p99 (0.456) while preserving target_p10 (0.517).
+RELATED_SCORES = [0.667, 0.615, 0.599, 0.572, 0.517]
 UNRELATED_SCORES = [0.362, 0.355, 0.339, 0.332, 0.329, 0.327, 0.321, 0.317]
 
 

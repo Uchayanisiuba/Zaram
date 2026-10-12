@@ -11,7 +11,7 @@ remember.
 """
 
 from .confirm import PendingConfirmations
-from .gate import EgressDenied, EgressGate, EgressRequest, is_local
+from .gate import EgressDenied, EgressGate, EgressRequest, SearchReadGrant, is_local
 from .log import EgressEntry, EgressLog, TamperDetected
 from .policy import DEFAULT_DECISION, DataClass, Decision, EgressPolicy, Mode
 from .runtime import (
@@ -27,6 +27,7 @@ __all__ = [
     "EgressGate",
     "EgressDenied",
     "EgressRequest",
+    "SearchReadGrant",
     "PendingConfirmations",
     "is_local",
     "EgressLog",

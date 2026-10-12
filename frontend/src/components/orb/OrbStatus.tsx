@@ -65,7 +65,7 @@ export default function OrbStatus({
     backendOnline, routing, activity, cloudAnsweredAt,
   });
   const accent = TONE_COLOR[tone] ?? 'var(--color-indigo)';
-  const busy = activity === 'thinking' || activity === 'coding';
+  const busy = activity === 'thinking' || activity === 'coding' || activity === 'computer_use';
 
   return (
     <button

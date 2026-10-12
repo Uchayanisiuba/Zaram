@@ -15,6 +15,7 @@ Most AI apps keep what you tell them on their servers, tied to their model. Zara
 - **Draws pictures and reads them**, when a model that can is available.
 - **Talks and listens**, if you turn that on.
 - **Uses tools** you attach — a 3D program, a code project, anything that speaks the MCP tool protocol — and asks before it changes or sends anything.
+- **Works your desktop**, if you turn on computer use: opens apps, reads windows, clicks and types for you, and asks before it changes anything.
 
 ## What leaves your computer, and what does not
 
@@ -37,6 +38,6 @@ Around the orb are six nodes. Each is one place:
 - **Memory** — what Zaram remembers about you, and the commitments it found. You can correct or delete anything here.
 - **Knowledge** — the folders and files Zaram reads, and the domains they are grouped into.
 - **Activity** — what left your machine, and what Zaram has been doing.
-- **Settings** — models, keys, packs, appearance, and help.
+- **Settings** — privacy, models, keys, voices, packs, tools, computer use, appearance, and help.
 
 Conversation is not a place; it is where you already are. Click the orb to open it and click it again to close it.

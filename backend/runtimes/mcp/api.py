@@ -37,7 +37,12 @@ to carry the field still attaches, it simply does not get to keep it.
 from __future__ import annotations
 
 import logging
+import os
+import platform
 import re
+import shutil
+import subprocess
+import tempfile
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -48,6 +53,13 @@ from .config import ServerConfig, ServerStore, known_host_reason
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tools", tags=["tools"])
+
+class ToolCallRequest(BaseModel):
+    """Direct tool invocation request."""
+    server: str
+    tool: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    session_id: Optional[str] = None
 
 #: Server ids become keys in ``mcp-servers.json`` and labels in the interface.
 #: Constrained so a paste cannot introduce a name that is awkward to display or
@@ -130,6 +142,9 @@ def _describe(cfg: ServerConfig) -> Dict[str, Any]:
         # permission: `grantedTools` above is the separate answer to what a
         # tool may *do*.
         "pinnedTools": sorted(cfg.pinned_tools),
+        # Off keeps the program, its grants and its pins; nothing about it reaches
+        # the model or runs until it is switched back on.
+        "enabled": cfg.enabled,
     }
 
 
@@ -170,6 +185,10 @@ class AttachRequest(BaseModel):
 
 class GrantRequest(BaseModel):
     tool: str
+
+
+class EnabledRequest(BaseModel):
+    enabled: bool
 
 
 class SessionGrantRequest(BaseModel):
@@ -249,6 +268,25 @@ async def detach_server(server_id: str) -> Dict[str, Any]:
     return {"detached": server_id}
 
 
+@router.put("/servers/{server_id}/enabled")
+async def set_server_enabled(server_id: str, request: EnabledRequest) -> Dict[str, Any]:
+    """Switch a server on or off without removing it.
+
+    Switching off stops its process at once, rather than at the next question, so
+    "off" is true the moment the switch says it.
+    """
+    cfg = _store().set_enabled(server_id, request.enabled)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"no server named {server_id!r}")
+    if not request.enabled and _MCP_RUNTIME is not None:
+        try:
+            _MCP_RUNTIME.disconnect(server_id)
+        except Exception:  # noqa: BLE001 - the switch is saved; the runtime stops it next turn
+            logger.warning("could not stop %s immediately", server_id)
+    logger.info("MCP server %s switched %s", server_id, "on" if request.enabled else "off")
+    return _describe(cfg)
+
+
 @router.post("/servers/{server_id}/grant")
 async def grant_tool(server_id: str, request: GrantRequest) -> Dict[str, Any]:
     """Remember that the user allowed one tool on one server.
@@ -261,6 +299,21 @@ async def grant_tool(server_id: str, request: GrantRequest) -> Dict[str, Any]:
     store = _store()
     configured = store.load()
     if server_id not in configured:
+        # A built-in is never in the store, so this used to be a bare 404 that
+        # the permission card rendered as "did not save". Said plainly instead:
+        # a by-name standing grant is not how a built-in is permitted. Its
+        # tools are governed per project (the switch in Project) or per
+        # conversation, and a grant here would outlive both -- and, for the
+        # code pack, would skip the project switch, since the tools do not
+        # re-check it and the gate is the only check.
+        if server_id in getattr(_MCP_RUNTIME, "_builtin", {}):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{server_id} is built in, so it is allowed per project in Project "
+                    "or per conversation, not always."
+                ),
+            )
         raise HTTPException(status_code=404, detail=f"no server named {server_id!r}")
     if not request.tool.strip():
         raise HTTPException(status_code=400, detail="tool name is empty")
@@ -348,3 +401,238 @@ async def tools_health() -> Dict[str, Any]:
     if _MCP_RUNTIME is None:
         raise HTTPException(status_code=503, detail="tool layer not initialized")
     return await _MCP_RUNTIME.health_check()
+
+
+@router.get("/pictures/{name}")
+async def tool_picture(name: str):
+    """A picture a tool returned, for the step card under the reply.
+
+    Served by name from Zaram's own picture folder (`runtime.pictures_dir`),
+    and only a name that is already a bare file name with a picture suffix:
+    nothing in the URL can point anywhere else. The same shape as the
+    screenshots `look_at_app` takes, which the card already shows.
+    """
+    from pathlib import Path as _Path
+
+    from fastapi.responses import FileResponse
+
+    from .runtime import PICTURE_TYPES, pictures_dir
+
+    media = {suffix: mime for mime, suffix in PICTURE_TYPES.items()}
+    safe = _Path(name).name
+    suffix = _Path(safe).suffix.lower()
+    if safe != name or suffix not in media:
+        raise HTTPException(status_code=404, detail="No such picture.")
+    path = pictures_dir() / safe
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No such picture. Zaram keeps only the most recent ones.")
+    return FileResponse(str(path), media_type=media[suffix])
+
+
+@router.post("/call")
+async def call_tool(request: ToolCallRequest) -> Dict[str, Any]:
+    """Directly invoke a tool on an MCP server, as the person pressing a button.
+
+    **The runtime decides, not this route.** `McpRuntime.execute` runs the floors,
+    the grant and the confirmation, and answers `needs_confirmation` rather than
+    running a call that has not been allowed. This route used to check grants
+    itself -- counting a *pin*, which is only visibility, as permission, and
+    skipping the check altogether when no `session_id` came with the request --
+    and then called a `call_tool` method the runtime does not have, so every
+    direct call ended in a 500. `confirmed` is never set here: nothing on this
+    route has asked anyone.
+    """
+    if _MCP_RUNTIME is None:
+        raise HTTPException(status_code=503, detail="tool layer not initialized")
+
+    known = set(_store().load()) | set(getattr(_MCP_RUNTIME, "_builtin", {}))
+    if request.server not in known:
+        raise HTTPException(status_code=404, detail=f"no server named {request.server!r}")
+
+    from .runtime import CALL
+
+    try:
+        result = await _MCP_RUNTIME.execute(CALL, {
+            "server": request.server,
+            "tool": request.tool,
+            "arguments": request.arguments,
+            "session": request.session_id or "",
+        })
+    except Exception as e:  # noqa: BLE001
+        logger.exception("tool call failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    # The interface reads camelCase; the runtime speaks snake_case.
+    return {**result, "needsConfirmation": bool(result.get("needs_confirmation"))}
+
+
+# --------------------------------------------------------------- cua-driver install
+
+import platform
+import subprocess
+import shutil
+from pathlib import Path
+from core.paths import data_dir
+
+CUADRIVER_INSTALL_DIR = Path(data_dir()) / "bin"
+CUADRIVER_BINARY = CUADRIVER_INSTALL_DIR / ("cua-driver.exe" if platform.system() == "Windows" else "cua-driver")
+
+class InstallRequest(BaseModel):
+    version: str = "latest"
+
+class InstallStatus(BaseModel):
+    status: str  # "downloading", "installing", "complete", "error"
+    progress: float = 0.0
+    message: str = ""
+    error: str = ""
+
+@router.post("/cua-driver/install")
+async def install_cua_driver(request: InstallRequest) -> InstallStatus:
+    """Download the pinned cua-driver release, check it, and put it in Zaram's data folder.
+
+    **Through the egress gate, and checked against a hash written in source.** This
+    used to build a URL from the wrong product's version number (a 404 on the first
+    press), fetch it with `urllib` around the gate, move a file named `cua.exe` that the
+    archive does not hold, and run whatever arrived. Now `cua_driver_install` names the
+    release the vendor really publishes, `get_gate().request` asks first and logs what
+    was fetched, and nothing is unpacked unless the SHA-256 is the one pinned there.
+
+    **And then it is connected, because installing was never the point.** Until 10
+    October a successful install left the program on disk and nothing else: the
+    Computer Use section lists *configured servers*, so it went on saying "not
+    installed" and the model never saw a tool. Install now writes the driver into
+    `mcp-servers.json` as `cua-driver mcp` (read off its own manifest), with telemetry
+    switched off for every launch -- see `cua_driver_install` for both. The runtime
+    connects on first use, like any other server.
+    """
+    import asyncio
+
+    from core.egress import EgressDenied, SearchReadGrant, get_gate
+
+    from . import cua_driver_install as cua
+
+    if request.version not in ("latest", cua.VERSION):
+        return InstallStatus(
+            status="error",
+            error=f"Only cua-driver {cua.VERSION} is pinned in this build of Zaram, so {request.version} was not fetched.",
+        )
+
+    already = CUADRIVER_INSTALL_DIR / CUADRIVER_BINARY.name
+    if already.exists():
+        # Already installed by Zaram -- after Remove, say. Connecting it again needs
+        # no download; switching it on in Settings needs not even this.
+        await asyncio.to_thread(cua.disable_telemetry, already)
+        connected = _connect_cua_driver(already)
+        return InstallStatus(
+            status="complete" if connected else "error",
+            progress=1.0,
+            message=f"cua-driver {cua.VERSION} was already installed, so nothing was downloaded. It is connected again."
+            if connected else "",
+            error="" if connected else "cua-driver is installed, but Zaram could not add it to its tools.",
+        )
+
+    def fetch(url: str) -> bytes:
+        # Pressing Install, under a sentence that names github.com, is the decision
+        # (rule 7j), so this one URL is granted. Without it the gate's default deny
+        # answered "no policy exists" on every machine that had never opened
+        # Activity -> Destinations. A host blocked on purpose and the kill switch
+        # still refuse: the grant never overrides either.
+        grant = SearchReadGrant.of([url], because="downloading cua-driver, which you asked for by pressing Install")
+        return get_gate().request(url, timeout=900.0, source="cua-driver-install", grant=grant)
+
+    try:
+        binary, _label = await asyncio.to_thread(
+            cua.download_and_install, fetch, platform.system(), platform.machine(), CUADRIVER_INSTALL_DIR
+        )
+    except EgressDenied as denied:
+        return InstallStatus(status="error", error=f"Zaram did not download it: {denied}")
+    except cua.InstallRefused as refused:
+        return InstallStatus(status="error", error=str(refused))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("cua-driver installation failed")
+        return InstallStatus(
+            status="error", error=f"The install failed ({type(exc).__name__}: {exc}). Nothing else was changed."
+        )
+
+    # Telemetry off in the driver's own settings before anything else runs it, and
+    # every launch below carries QUIET_ENV regardless.
+    await asyncio.to_thread(cua.disable_telemetry, binary)
+
+    connected = _connect_cua_driver(binary)
+    return InstallStatus(
+        status="complete",
+        progress=1.0,
+        message=(
+            f"cua-driver {cua.VERSION} is installed and connected as a tool. Its telemetry is "
+            f"switched off. Actions that change something on your screen ask first."
+            if connected
+            else f"cua-driver {cua.VERSION} is installed at {binary}, but Zaram could not add it to its tools."
+        ),
+    )
+
+
+def _connect_cua_driver(binary: Path) -> bool:
+    """File the installed driver in `mcp-servers.json`, keeping grants if it was already there.
+
+    Same rule as `attach_servers` about consent: grants survive only when the command
+    is unchanged, because a different command is a different program.
+    """
+    from . import cua_driver_install as cua
+
+    store = _store()
+    try:
+        configured = store.load()
+        fresh = ServerConfig.from_json(cua.SERVER_ID, cua.server_entry(binary))
+        previous = configured.get(cua.SERVER_ID)
+        if previous is not None and previous.command == fresh.command:
+            fresh.granted_tools = set(previous.granted_tools)
+            fresh.pinned_tools = set(previous.pinned_tools)
+            fresh.writes = previous.writes
+        # Pressing Install is asking for it to work, so it is on afterwards.
+        fresh.enabled = True
+        configured[cua.SERVER_ID] = fresh
+        store.save(configured)
+    except Exception:  # noqa: BLE001 - the install itself succeeded; say so honestly
+        logger.exception("could not file cua-driver as a server")
+        return False
+    logger.info("cua-driver attached as %s (%s)", cua.SERVER_ID, " ".join(fresh.command))
+    return True
+
+
+@router.get("/cua-driver/status")
+async def cua_driver_status() -> Dict[str, Any]:
+    """Check cua-driver installation status."""
+    import asyncio
+
+    from . import cua_driver_install as cua
+
+    if CUADRIVER_BINARY.exists():
+        try:
+            result = await asyncio.to_thread(cua.run_driver, CUADRIVER_BINARY, "--version", timeout=15)
+            if result.returncode == 0:
+                return {
+                    "installed": True,
+                    "path": str(CUADRIVER_BINARY),
+                    "version": result.stdout.strip(),
+                    "in_path": shutil.which("cua-driver") is not None,
+                }
+        except Exception:
+            pass
+    return {
+        "installed": False,
+        "path": str(CUADRIVER_BINARY),
+        "version": None,
+        "in_path": False,
+    }
+
+
+@router.get("/cua-driver/health")
+async def cua_driver_health(server: str = "cua-driver") -> Dict[str, Any]:
+    """Ask the driver whether it can act on this machine, through its own tools.
+
+    The Computer Use section read `cuaHealth` off every server and nothing ever filled
+    it in, so it said "Health check not available" forever and its "Check health"
+    button re-read the server list. This is the call that button now makes.
+    """
+    if _MCP_RUNTIME is None:
+        return {"status": "not_connected", "error": "Zaram's tool runtime is still starting."}
+    return await _MCP_RUNTIME._check_cua_driver_health(server)

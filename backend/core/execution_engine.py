@@ -59,6 +59,7 @@ from core.tool_loop import (
     MAX_TOOL_ROUNDS,
     ToolCall,
     ToolTurn,
+    bounded,
     parse_call,
     call_target,
     render_result,
@@ -75,6 +76,8 @@ from core.egress.step_context import carries_step, current_step, running_step
 from core.step_labels import describe_step
 from core.scheduler import RuntimeScheduler
 from core.task_queue import TaskQueue
+from core.pipeline.pipeline import get_pipeline
+from core.pipeline.types import PipelineContext
 
 
 class _Ticker:
@@ -322,6 +325,11 @@ class ExecutionEngine:
         #: the checklist arriving empty in every test. The tool's result is
         #: the same list, deterministic, and crosses no thread.
         self._checklists: dict[str, list] = {}
+        #: (session_id, request) -> the pictures a document written now could
+        #: carry. Injected by the bootstrapper; `None` names none.
+        self._picture_names: Any | None = None
+        #: request -> the field a picture goes in for that kind of document.
+        self._picture_slot: Any | None = None
         #: session_id → the project that session's questions belong to (7i).
         #:
         #: Recorded per request so a task stopped in a project is filed under
@@ -439,6 +447,39 @@ class ExecutionEngine:
     def set_code_project_open(self, probe: Any | None) -> None:
         """Forwarded to the planner, like the vocabulary and for the same reason."""
         self._planner.set_code_project_open(probe)
+
+    def set_picture_names(self, probe: Any | None, slot: Any | None = None) -> None:
+        """How to learn which attached pictures a document could carry.
+
+        Injected, like the probes above, so `core/` keeps no import of the
+        attachments layer or the documents runtime. ``slot`` maps a request to
+        the field a picture goes in for an invoice, a CV or a deck (``""`` for a
+        document written as markdown).
+        """
+        self._picture_names = probe
+        self._picture_slot = slot
+
+    def _document_picture_guidance(self, session_id: str, request: str, seen: bool) -> str:
+        """The names of the pictures a document may place, for the writing step.
+
+        The names only -- the bytes are read when the file is made
+        (`attachments/pictures.py`). Empty when nothing is attached or the
+        document asked for has nowhere to put a picture.
+        """
+        if self._picture_names is None:
+            return ""
+        try:
+            from attachments.pictures import document_guidance
+
+            # `getattr`: an engine built without `__init__` (tests) has no slot.
+            slot_of = getattr(self, "_picture_slot", None)
+            slot = (slot_of(request) if slot_of is not None else "") or ""
+            return document_guidance(
+                self._picture_names(session_id, request), seen=seen, slot=slot
+            )
+        except Exception:  # noqa: BLE001 - guidance must never fail a reply
+            logger.exception("Engine: could not name the attached pictures")
+            return ""
 
     def _plan_items(self, session_id: str) -> list:
         return list(self._checklists.get(session_id) or [])
@@ -745,6 +786,11 @@ class ExecutionEngine:
         # Told about it, the plan stays an ordinary generation rather than
         # diverting to `vision.analyze`, whose input key is singular and which
         # this engine never fills. See `IntentPlanner.create_plan`.
+        #
+        # `prompt` is the composed message, attachments first. The planner
+        # decides what kind of turn this is from the person's own words and
+        # builds the steps the model answers from out of the whole -- a search
+        # query is never the file. See `create_plan` and `planner._asked`.
         t = time.monotonic()
         plan = self._planner.create_plan(prompt, has_images=bool(images))
         timing["plan_ms"] = int((time.monotonic() - t) * 1000)
@@ -795,13 +841,34 @@ class ExecutionEngine:
         # image, translate, search the classifier was sure of — is untouched,
         # and so is every model that cannot call tools. The gate still runs
         # on the tool actually chosen; a listing authorises nothing.
-        if as_planned == ["reasoning.generate"] and self._model_chooses_tools(model):
+        if (
+            as_planned == ["reasoning.generate"]
+            and self._model_chooses_tools(model)
+            and not self._writes_a_page_in_the_chat(prompt, session_id)
+        ):
             plan.steps[0].depends_on = [0]
             plan.steps.insert(
                 0,
                 ExecutionStep(capability_id="mcp.list_tools", input_data={"query": ""}, depends_on=[]),
             )
             plan = self._drop_unavailable_steps(plan)
+        elif (
+            as_planned in ([MCP_LIST_TOOLS], [MCP_LIST_TOOLS, "reasoning.generate"])
+            and self._writes_a_page_in_the_chat(prompt, session_id)
+        ):
+            # The planner listed tools itself, and a page in the chat takes
+            # none (see `_writes_a_page_in_the_chat`). It plans on the whole
+            # prompt, attachments included: measured 11 October 2026, the words
+            # read out of an attached screenshot of Zaram's own interface
+            # ("Select", "Preview", "Save") made "make me a portfolio website
+            # using this photo" a tool turn, which wrote behind an empty bubble
+            # until the window gave up.
+            # A TOOL intent plans the listing alone (the engine adds the
+            # answer after it) or with the answer; either way what is left is
+            # one plain generation of the whole prompt.
+            plan.steps = [
+                ExecutionStep(capability_id="reasoning.generate", input_data={"prompt": prompt}, depends_on=[])
+            ]
 
         # **Tools first, then the conversation — the second half of A3.** The
         # tool rules and the repository briefing are constant for a session,
@@ -996,6 +1063,19 @@ class ExecutionEngine:
                                 kind="search",
                                 action="settings",
                             )
+
+            # The pictures a document may carry, by name, on the step that
+            # writes it. Only when a document is being made and pictures are
+            # held, so no other turn's prompt changes.
+            if step.capability_id == "reasoning.generate" and any(
+                s.capability_id.startswith("document.") for s in plan.steps
+            ):
+                named = self._document_picture_guidance(session_id, prompt, bool(images))
+                if named:
+                    step.input_data = dict(step.input_data or {})
+                    step.input_data["prompt"] = (
+                        (step.input_data.get("prompt", "") or prompt) + "\n\n" + named
+                    )
 
             # The images attached to this message, put where the dispatcher
             # reads them. On the generation step only: a search step handed a
@@ -1337,7 +1417,14 @@ class ExecutionEngine:
     #: `test_the_shortlist_covers_the_deepest_target`, which prints that
     #: headroom on every run precisely so this number can be revisited from
     #: evidence.
-    MAX_RECALL = 6
+    #
+    #: **Revised 9 October 2026**: This is now a *safety ceiling*, not the primary
+    #: cap. The primary cap is dynamic — facts within 0.15 cosine of the top
+    #: score are kept (adaptive to query specificity). This ceiling prevents
+    #: pathological cases where a very broad query matches hundreds of facts
+    #: above the floor. Measured: the deepest target rank at 1,000 docs is 1,
+    #: so a ceiling of 25 is generous insurance.
+    MAX_RECALL = 25
 
     #: How many candidates to retrieve before the floor and the cut.
     #:
@@ -1450,17 +1537,21 @@ class ExecutionEngine:
     #: answers carrying their sources, which only works if the converse holds.
     #:
     #: bge-m3 puts any two English sentences around 0.3 even when they share no
-    #: subject, so the usable signal starts well above zero. 0.42 sits in the
-    #: gap measured above. Re-measure if the embedding model changes — this
-    #: number is not transferable between models, which is why the backend can
-    #: override it.
-    MIN_RECALL_SCORE = float(os.getenv("ZARAM_MIN_RECALL_SCORE", "0.42"))
+    #: subject, so the usable signal starts well above zero. 0.42 sat in the
+    #: gap measured on a small corpus (unrelated ≤ 0.362). **Recalibrated 9
+    #: October 2026**: on a real Spine, conversational noise ("good morning")
+    #: scores ~0.59, and short filler crowds the floor. The new floor of 0.51
+    #: sits above noise_p99 (0.456) while preserving target_p10 (0.517). Override via
+    #: ZARAM_MIN_RECALL_SCORE if a different embedder shifts the distributions.
+    #: Re-measure if the embedding model changes — this number is not
+    #: transferable between models, which is why the backend can override it.
+    MIN_RECALL_SCORE = float(os.getenv("ZARAM_MIN_RECALL_SCORE", "0.51"))
 
     #: Below this, a memory was worth giving the model but is not worth citing.
     #:
     #: A second, higher cut on the *same* `relevance` field, because "worth
     #: injecting" and "worth telling the user about" are different questions.
-    #: Injecting six facts and citing the two that carried the answer is the
+    #: Injecting facts and citing the ones that carried the answer is the
     #: correct behaviour, not a compromise.
     #:
     #: Measured: driving the interface produced a reply about a day rate citing
@@ -1470,17 +1561,17 @@ class ExecutionEngine:
     #: five citations has taught the user that citations are decoration, and
     #: after that the real ones cannot help.
     #:
-    #: 0.55 sits inside that observed band rather than above it, so the fact
-    #: that carried the answer is still cited while the merely-adjacent ones
-    #: move to the panel's "recalled, not cited" section. They are not hidden —
-    #: `_provenance_events` emits them with `cited=False` — and the gap between
-    #: the two thresholds is visible in the UI and therefore arguable.
+    #: **Recalibrated 9 October 2026**: MIN_RECALL_SCORE is now 0.55. The citation
+    #: cut is raised to 0.65 to preserve a "recalled but not cited" band where
+    #: adjacent facts are given to the model but not shown to the user.
+    #: `_provenance_events` emits them with `cited=False` — the gap is visible
+    #: in the UI and therefore arguable.
     #:
     #: **Never applies to web sources.** Bytes leaving the machine are always
     #: cited regardless of relevance; that is an egress disclosure, not an
     #: attribution judgement, and thresholding it would hide the one thing this
     #: product exists to show.
-    MIN_CITATION_SCORE = float(os.getenv("ZARAM_MIN_CITATION_SCORE", "0.55"))
+    MIN_CITATION_SCORE = float(os.getenv("ZARAM_MIN_CITATION_SCORE", "0.65"))
 
     #: Capabilities whose output is context for later steps, never shown to the
     #: user. Their raw payloads (JSON search results, for example) would
@@ -1827,6 +1918,7 @@ class ExecutionEngine:
                                 input_data={
                                     "prompt": result_prompt(original_prompt, turns, may_call_again=True),
                                     **({"tools": native_tools} if native_tools else {}),
+                                    **self._sight(turns, model),
                                 },
                                 depends_on=[],
                             ),
@@ -1888,6 +1980,7 @@ class ExecutionEngine:
                         input_data={
                             "prompt": result_prompt(original_prompt, turns, may_call_again=True),
                             **({"tools": native_tools} if native_tools else {}),
+                            **self._sight(turns, model),
                         },
                         depends_on=[],
                     ),
@@ -1988,6 +2081,7 @@ class ExecutionEngine:
                     # the tool's name a second time.
                     grantable=bool(result.get("grantable")),
                     grant_scope=str(result.get("grant_scope") or ""),
+                    builtin=bool(result.get("builtin")),
                     held_task=held_task,
                     # Never for a call whose target the card cannot show: a
                     # yes to something unseen is not a yes.
@@ -2031,8 +2125,12 @@ class ExecutionEngine:
                     plan_step=plan_step,
                 )
                 payload: Any = {"error": error}
+                pictures: list[str] = []
             else:
                 payload = result.get("result")
+                # What the tool showed, kept on disk by the runtime. The card
+                # shows the newest; a model that can see is shown it next round.
+                pictures = [str(p) for p in (result.get("images") or []) if p]
                 # A successful write is remembered for this session, so a
                 # later `run_command` that would execute it can say so.
                 self._session_files(session_id).record(
@@ -2052,8 +2150,9 @@ class ExecutionEngine:
                 # Imported here, like `active_root` below: the engine must not
                 # fail to import because a pack does.
                 from packs.code import driving
+                from packs.code.apps import page_url as app_page_url
 
-                acted = str(change.get("acted") or "") if isinstance(change, dict) else ""
+                acted =str(change.get("acted") or "") if isinstance(change, dict) else ""
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "allow", "ran",
                     target=acted or call_target(call.tool, call.arguments),
@@ -2062,14 +2161,66 @@ class ExecutionEngine:
                     output=output_excerpt(payload),
                     diff=str(change.get("diff") or ""),
                     commit=str(change.get("commit") or ""),
-                    image=str(change.get("image") or ""),
+                    image=str(change.get("image") or "") or (pictures[-1] if pictures else ""),
+                    # Only Zaram's own settings server may ask the window to
+                    # change: a stranger's tool returning `apply` is just data.
+                    apply=(
+                        change.get("apply")
+                        if call.server == "zaram-self" and isinstance(change.get("apply"), dict)
+                        else None
+                    ),
                     # The driving tools report the page they are on, so the
                     # card follows Zaram around the app instead of showing
                     # wherever the dev server first landed.
-                    app_url=str(change.get("url") or "")
-                    if call.tool in ("start_app", "get_app_status") or call.tool in driving.TOOL_NAMES
+                    #
+                    # A started *stack* has no `url` of its own -- it answers
+                    # with a list of processes -- so `page_url` picks the
+                    # frontend's. Without it the card and the browser pane that
+                    # opens from it had nothing to open for a stack.
+                    app_url=app_page_url(call.tool, change)
+                    if call.tool in ("start_app", "start_app_stack", "get_app_status") or call.tool in driving.TOOL_NAMES
                     else "",
                 )
+
+            # Pipeline outlet filters on the tool result. The switch is
+            # `Pipeline.enabled`, which reads ZARAM_PIPELINE_ENABLED itself; this
+            # block once tested a `USE_PIPELINE` that only `chat_router` defines,
+            # and raised NameError after every tool call.
+            pipeline = get_pipeline()
+            if pipeline and pipeline.enabled:
+                original_text = json.dumps(payload) if payload else ""
+                tool_response = {
+                    "text": original_text,
+                    "model": model,
+                    "session_id": session_id,
+                    "project_id": self._project_ids.get(session_id, ""),
+                    "tool_call": {
+                        "server": call.server,
+                        "tool": call.tool,
+                        "arguments": call.arguments,
+                    },
+                }
+                tool_context = PipelineContext(
+                    request={},
+                    response=tool_response,
+                    session_id=session_id,
+                    user_id="user",
+                    project_id=self._project_ids.get(session_id, ""),
+                )
+                filtered_tool_response = run_sync(pipeline.process_outlet(tool_response, tool_context))
+                filtered_text = filtered_tool_response.get("text", original_text)
+                if filtered_text != original_text:
+                    tool_context.metadata["pipeline_outlet_filtered"] = True
+                    if isinstance(payload, dict):
+                        # Keep the shape. Later code reads `payload` as a dict --
+                        # the web-search sources that must be disclosed among
+                        # them -- and a bare string would silently drop them.
+                        try:
+                            payload = json.loads(filtered_text)
+                        except ValueError:
+                            payload = {"text": filtered_text}
+                    else:
+                        payload = filtered_text
 
             if call.server == "web" and call.tool == "search" and isinstance(payload, dict):
                 # Rule 2: bytes left the machine to fetch these, so they are
@@ -2079,7 +2230,7 @@ class ExecutionEngine:
                 for event in self._search_provenance_events(results):
                     yield event
 
-            turns.append(ToolTurn(call=call, result=payload))
+            turns.append(ToolTurn(call=call, result=self._bounded(payload, model), images=tuple(pictures)))
             rounds += 1
             made += 1
 
@@ -2173,6 +2324,7 @@ class ExecutionEngine:
                                     original_prompt, turns, may_call_again=True
                                 ),
                                 **({"tools": native_tools} if native_tools else {}),
+                                **self._sight(turns, model),
                             },
                             depends_on=[],
                         )
@@ -2202,6 +2354,7 @@ class ExecutionEngine:
                 input_data={
                     "prompt": result_prompt(original_prompt, turns, may_call_again=True),
                     **({"tools": native_tools} if native_tools else {}),
+                    **self._sight(turns, model),
                 },
                 depends_on=[],
             )
@@ -2244,7 +2397,8 @@ class ExecutionEngine:
         final = ExecutionStep(
             capability_id="reasoning.generate",
             input_data={
-                "prompt": result_prompt(original_prompt, turns, may_call_again=False)
+                "prompt": result_prompt(original_prompt, turns, may_call_again=False),
+                **self._sight(turns, model),
             },
             depends_on=[],
         )
@@ -2680,6 +2834,7 @@ class ExecutionEngine:
             input_data={
                 "prompt": result_prompt(pending.question, turns, may_call_again=True),
                 **({"tools": native_tools} if native_tools else {}),
+                **self._sight(turns, model),
             },
             depends_on=[],
         )
@@ -2782,6 +2937,63 @@ class ExecutionEngine:
             kept.append(turn)
         kept.reverse()
         return kept, len(turns) - len(kept)
+
+    def _bounded(self, payload: Any, model: str | None) -> Any:
+        """A tool's answer cut to what one window can carry, or as it was.
+
+        `carry_tokens`, so the newest result always survives a handoff -- a
+        result too large to carry anywhere is dropped by
+        `_turns_that_still_fit`, and the task closes having lost the very thing
+        it just read. Older results make room for it, which is the handoff's
+        ordinary job. See `tool_loop.bounded`.
+        """
+        try:
+            limit = self._budget_for(model).carry_tokens
+        except Exception:  # noqa: BLE001 - a budget lookup must never fail a call
+            return payload
+        return bounded(payload, limit)
+
+    def _sight(self, turns: list[ToolTurn], model: str | None) -> dict[str, Any]:
+        """The newest picture a tool returned, for a model that can see it.
+
+        **A capability gate, never a ranking** (CLAUDE.md, images): a model is
+        shown the picture only when the catalogue says it accepts images. A
+        model that cannot see is not handed one -- its prompt already says a
+        picture came back, and it works from the text of the result, which is
+        what a desktop tool's text tree is for. Unknown is treated as cannot,
+        because a picture sent to a text model is an error from the provider.
+
+        The newest only. A task that takes ten screenshots is looking at the
+        screen as it is now; resending every earlier frame costs each one again
+        on every round and tells the model nothing the last one does not.
+
+        It travels as `images`, the key an attached photo uses, so the cloud
+        engines class the request as a picture and the gate asks about pictures
+        for that provider exactly as it does for a photo (rule 7j).
+        """
+        newest = next((t.images[-1] for t in reversed(turns) if t.images), "")
+        if not newest or not self._model_sees(model):
+            return {}
+        try:
+            import base64
+            from pathlib import Path as _Path
+
+            data = base64.b64encode(_Path(newest).read_bytes()).decode("ascii")
+        except OSError:
+            return {}
+        return {"images": [data]}
+
+    def _model_sees(self, model: str | None) -> bool:
+        """Whether the catalogue says ``model`` accepts images. False if unknown."""
+        manager = getattr(self, "_provider_manager", None)
+        if manager is None:
+            return False
+        name = self._effective_model(model)
+        try:
+            found = next((m for m in manager.catalog.all() if m.display_name == name), None)
+        except Exception:  # noqa: BLE001 - a catalogue read must never fail a reply
+            return False
+        return bool(found is not None and getattr(found, "supports_vision", False))
 
     def has_continuation(
         self, session_id: str = "default", project_id: str = ""
@@ -3175,9 +3387,23 @@ class ExecutionEngine:
                 continue
             seen.add(key)
             kept.append(r)
-            if len(kept) >= self.MAX_RECALL:
-                break
-        logger.info("Engine: recalled %d/%d memories above threshold", len(kept), len(results))
+
+        # Dynamic relevance-weighted cap: keep facts within 0.15 cosine of the
+        # top score. This adapts to query specificity — narrow queries get 2-3
+        # highly relevant facts; broad queries get more. The hard ceiling
+        # (MAX_RECALL, default 25) is a safety net for pathological cases.
+        dynamic_floor = self.MIN_RECALL_SCORE
+        if kept:
+            top_relevance = _relevance_of(kept[0])
+            dynamic_floor = max(self.MIN_RECALL_SCORE, top_relevance - 0.15)
+            kept = [r for r in kept if _relevance_of(r) >= dynamic_floor]
+
+            # Safety ceiling — should never bind with current floor + distributions
+            if len(kept) > self.MAX_RECALL:
+                kept = kept[: self.MAX_RECALL]
+
+        logger.info("Engine: recalled %d/%d memories above threshold (dynamic floor %.3f)",
+                    len(kept), len(results), dynamic_floor)
         self._publish("memory.recalled", {
             "query": prompt[:100],
             "candidates": len(results),
@@ -3200,6 +3426,39 @@ class ExecutionEngine:
         except Exception:  # noqa: BLE001 - a lookup must not fail a reply
             return False
 
+    def _writes_a_page_in_the_chat(self, prompt: str, session_id: str) -> bool:
+        """Whether this turn writes a page into the reply, with no project open.
+
+        **Such a turn is offered no tools — 11 October 2026.** Measured on the
+        resident Qwen3.8-27B asked for a Minecraft-style game: the listing put
+        ~6,100 tokens of tool text in the system prompt and ~10,600 more as
+        native schemas, so a reply of 15,000+ tokens was written against a
+        27,000-token prompt and came out at about half the speed the same model
+        writes with a short one (23 against ~55 characters a second). Tools also
+        hold the reply back until the model is done -- a page written for
+        twenty minutes behind an empty bubble -- and invited detours: earlier
+        attempts at the same game called Blender's scene reader.
+
+        A page in the chat is written in the reply and run by the preview, so
+        no tool takes part in it. With a project open it is different -- the
+        page belongs in the project's files and the code tools write it -- so
+        this answers False whenever a coding project is active. Decided by
+        `asks_to_build_a_page`, which needs a building verb: the broader page
+        guidance test matches "browser" and "website", and "open google in my
+        browser" or "read this website" must keep their tools.
+        """
+        if self._code_root() is not None:
+            return False
+        try:
+            from attachments.compose import own_words
+            from core.page_guidance import asks_to_build_a_page
+
+            # The person's words, not the composed prompt: text read from an
+            # attached picture sits in front of them and once decided this.
+            return asks_to_build_a_page(own_words(prompt))
+        except Exception:  # noqa: BLE001 - routing must never fail a request
+            return False
+
     def _wants_ranked_tools(self, prompt: str) -> bool:
         """Whether the stranger shortlist should be ranked by *this* question.
 
@@ -3210,9 +3469,12 @@ class ExecutionEngine:
         this decides only which of a stranger's tools are shown.
         """
         try:
-            from core.planner import IntentType, _names_a_page
+            from core.planner import IntentType, _asked, _names_a_page
 
-            if _names_a_page(prompt):
+            # The words, not the composed prompt: an address inside an
+            # attached file is not a page the person named. (`classify_intent`
+            # below strips the block itself.)
+            if _names_a_page(_asked(prompt)):
                 return True
             return self._planner.classify_intent(prompt).intent_type is IntentType.TOOL
         except Exception:  # noqa: BLE001 - routing must never fail a request
@@ -3723,6 +3985,17 @@ class ExecutionEngine:
         # an ordinary conversation is unchanged.
         root = self._open_repository()
         if root is not None:
+            # Its name as well as its folder, so a question that names the
+            # project ("the unfinished tasks in Ride Share") resolves to the
+            # folder rather than to a search for the phrase.
+            try:
+                from core.open_project import open_project_name
+
+                called = open_project_name()
+            except Exception:  # noqa: BLE001 - a prompt must never fail on this
+                called = None
+            if called:
+                lines += [f"- The project open is called \"{called}\"; its name means this repository."]
             lines += [
                 f"- A repository is open at `{root}`. \"This project\", \"the "
                 "repo\" and",

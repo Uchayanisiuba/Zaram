@@ -73,6 +73,8 @@ const RIM_COLOUR: Record<EmbodimentState, number> = {
   // fourth: adding a colour here would put a legend back on the one indicator
   // whose whole value is not needing one.
   coding: 0x78dcf0,
+  // Working is working; computer use is not a fifth colour either.
+  computer_use: 0x78dcf0,
   listening: 0x78dcf0,
   speaking: 0x78dcf0,
   // Every other state animates faster to signal effort. A swap is the one state
@@ -89,6 +91,7 @@ const MOTION_RATE: Record<EmbodimentState, number> = {
   // composure; a faster rate than the state it narrows would say coding is
   // more urgent than thought, which is not a claim the product wants to make.
   coding: 1.3,
+  computer_use: 1.3,
   listening: 1.2,
   speaking: 1.4,
   swapping: 0.45,

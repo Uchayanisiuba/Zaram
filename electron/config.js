@@ -96,6 +96,10 @@ function createConfig(options) {
         '/garage',
         // Running a page a model wrote before it is shown (`POST /preview/check`).
         '/preview',
+        // Tested starting points a page reply builds on (`backend/starters`).
+        '/starters',
+        // Photographs found for a page the model described (`packs/photos`).
+        '/photos',
         '/diagnostics',
         '/extras',
         '/health',

@@ -438,10 +438,12 @@ class StreamEvent:
         app_url: str = "",
         grantable: bool = False,
         grant_scope: str = "",
+        builtin: bool = False,
         step_id: str = "",
         plan_step: int | None = None,
         held_task: str = "",
         once: bool = False,
+        apply: dict | None = None,
     ) -> StreamEvent:
         """One tool call, and what the gate said about it.
 
@@ -505,6 +507,10 @@ class StreamEvent:
                 # the server has no opinion, and the card then shows one
                 # rung fewer rather than a control that settles nothing.
                 "grant_scope": grant_scope,
+                # Whether the server is one Zaram ships. On a `confirm` the card
+                # does not offer "Always" for it: a built-in has no standing
+                # grant to keep, so the button could only fail.
+                "builtin": builtin,
                 # On a `confirm`: the task this call was parked on, so the
                 # card can carry on from it rather than ask the question
                 # again from nothing, and whether *Run this once* may be
@@ -515,6 +521,11 @@ class StreamEvent:
                 # (`core/egress/step_context.py`), so the working pane can
                 # ask the log what this call sent. Empty when unmarked.
                 "step_id": step_id,
+                # A change the window makes itself -- which indicator shows,
+                # which place is open -- from Zaram's own settings server and
+                # no other. The engine decides whose it is; the window applies
+                # only the keys it knows. Absent on every other call.
+                **({"apply": apply} if apply else {}),
             },
             correlation_id=correlation_id,
         )

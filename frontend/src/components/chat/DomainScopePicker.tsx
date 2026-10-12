@@ -24,6 +24,7 @@
  */
 import { useEffect, useState } from 'react';
 import { Library } from 'lucide-react';
+import { BAR_CHIP } from '@/components/chat/barChip';
 
 import { useChatStore } from '@/stores/chatStore';
 import { fetchDomains, type KnowledgeDomain } from '@/services/domainsClient';
@@ -64,7 +65,7 @@ export default function DomainScopePicker() {
   const missing = selected && !domains.some((d) => d.id === selected);
 
   return (
-    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+    <div className={BAR_CHIP}>
       <Library size={12} aria-hidden className="shrink-0" />
       <label htmlFor="domain-scope" className="sr-only">
         Knowledge domain this question is asked inside

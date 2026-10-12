@@ -145,6 +145,7 @@ export default function RememberAction({
             autoFocus
             value={draft}
             rows={3}
+            spellCheck={true}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Escape') setDraft(null);

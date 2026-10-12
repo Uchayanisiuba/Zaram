@@ -40,6 +40,7 @@ decision and calls back with `grant`.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import time
@@ -52,7 +53,7 @@ from core.untrusted import Provenance, scan
 from .client import McpServer, ToolDescriptor
 from .config import ServerConfig, ServerStore
 from .floors import floor_for
-from .policy import Verdict, WriteMode, decide, looks_destructive, looks_outbound
+from .policy import Verdict, WriteMode, always_asks, decide, looks_destructive, looks_outbound
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,108 @@ RUNTIME_VERSION = "0.1.0"
 LIST_TOOLS = "mcp.list_tools"
 #: Invoke one, subject to the write policy.
 CALL = "mcp.call"
+
+#: Pictures a tool sent back, kept so the person can see what Zaram saw and a
+#: model that can see is shown the picture itself.
+PICTURE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
+#: How many are kept. A screenshot of somebody's desktop is a liability before
+#: it is a feature (CLAUDE.md, retention), so this is a short window rather
+#: than an archive: enough to scroll back through one task, never a record.
+PICTURES_KEPT = 40
+#: Larger than any screenshot measured (2.2 MB for 1920x1080, base64), small
+#: enough that a server cannot fill the disk through this folder.
+PICTURE_MAX_BYTES = 20 * 1024 * 1024
+
+
+def pictures_dir() -> Path:
+    """Where tool pictures are kept: Zaram's data directory, never a project."""
+    from core.paths import data_dir
+
+    return Path(data_dir()) / "screens" / "tools"
+
+
+def keep_media(result: Any, folder: Optional[Path] = None) -> tuple[Any, List[str]]:
+    """A tool's result with its pictures saved to disk, and where they went.
+
+    Found 10 October 2026, by asking the resident model to open google.com with
+    computer use on: it read a window and the run died with *"prompt length
+    1690633 exceeds the available context size of 65536"*. `get_window_state`
+    returns the window's text tree (4.7 KB) **and a 2.2 MB base64 screenshot**,
+    and the whole result was written into the prompt as text -- where a
+    picture is not a picture, only two million characters of noise.
+
+    The first fix dropped the payload, and the maintainer rejected that the
+    same day: *"Don't block images."* Right -- the picture is the most useful
+    thing a desktop tool returns, it was only travelling the wrong way. So it
+    is kept: saved here, shown to the person on the step card, and handed to a
+    model that can see through the same channel an attached photo uses (which
+    is also the channel the egress gate classes as a picture, so a cloud model
+    is asked about pictures exactly as it is for a photo). In the text, the
+    block becomes a line saying a picture came back.
+
+    Audio has nowhere useful to go yet, so it becomes a line too. Anything that
+    is not a known picture type, or is too large, is described rather than
+    written. The server's own object is copied, never edited.
+    """
+    saved: List[str] = []
+    target = folder or pictures_dir()
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            kind = node.get("type")
+            data = node.get("data")
+            if kind in ("image", "audio") and isinstance(data, str):
+                size_kb = max(1, len(data) * 3 // 4 // 1024)
+                if kind == "image":
+                    path = _save_picture(data, str(node.get("mimeType") or ""), target)
+                    if path is not None:
+                        saved.append(str(path))
+                        return {"type": "text", "text": f"[a picture came back with this result ({size_kb} KB): {path.name}]"}
+                return {"type": "text", "text": f"[a {kind} of about {size_kb} KB came back with this result and was not kept]"}
+            return {key: walk(value) for key, value in node.items()}
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        return node
+
+    return walk(result), saved
+
+
+def _save_picture(data: str, mime: str, folder: Path) -> Optional[Path]:
+    """Write one base64 picture, or ``None`` if it is not one Zaram will keep."""
+    import base64
+    import binascii
+    import uuid
+
+    suffix = PICTURE_TYPES.get(mime.lower())
+    if suffix is None or len(data) * 3 // 4 > PICTURE_MAX_BYTES:
+        return None
+    try:
+        raw = base64.b64decode(data, validate=False)
+    except (binascii.Error, ValueError):
+        return None
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}{suffix}"
+        path.write_bytes(raw)
+        _prune_pictures(folder)
+        return path
+    except OSError:
+        logger.exception("could not keep a tool's picture")
+        return None
+
+
+def _prune_pictures(folder: Path) -> None:
+    """Keep the newest `PICTURES_KEPT`; the rest go."""
+    pictures = sorted(
+        (p for p in folder.iterdir() if p.suffix in PICTURE_TYPES.values()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for old in pictures[PICTURES_KEPT:]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
 #: How many tool schemas may be put in front of a model at once.
 #:
@@ -279,40 +382,86 @@ class McpRuntime:
 
     async def health_check(self) -> Dict[str, Any]:
         configured = self._store.load()
+        servers_info = {}
+        for name, cfg in configured.items():
+            server_info = {
+                "transport": cfg.transport,
+                "reachable": cfg.reachable,
+                "reason": "" if cfg.reachable else "http transport is not implemented yet",
+                "writes": cfg.writes.value,
+                "connected": name in self._connections,
+                "tools": self._tool_counts.get(name),
+                "offered": self._last_offered.get(name),
+                "builtin": name in self._builtin,
+            }
+            # Add cua-driver specific health info
+            if "cua" in name.lower() or "cua-driver" in name.lower():
+                server_info["cua_health"] = await self._check_cua_driver_health(name)
+            servers_info[name] = server_info
+
         return {
             "status": "healthy" if self._state == RuntimeState.READY else "degraded",
             "runtime_id": RUNTIME_ID,
             "calls": self._calls,
-            # The budget every stranger's server shares. Reported so the
-            # shortfall below is a number somebody can act on rather than a
-            # mystery — it is what `ZARAM_TOOL_BUDGET` sets.
             "tool_budget": self._budget,
-            "servers": {
-                name: {
-                    "transport": cfg.transport,
-                    # Visible rather than silent: an http server is configured
-                    # and cannot be reached, and the interface must be able to
-                    # say so instead of showing an empty list.
-                    "reachable": cfg.reachable,
-                    "reason": "" if cfg.reachable else "http transport is not implemented yet",
-                    "writes": cfg.writes.value,
-                    "connected": name in self._connections,
-                    # How many tools this server offers, and how many were put
-                    # in front of the model on the last question. `None` before
-                    # anything has been asked — not 0, because "nothing has
-                    # happened yet" and "this server was shut out" are
-                    # different answers and the interface must not show one as
-                    # the other. Same distinction `vram_bytes` draws.
-                    "tools": self._tool_counts.get(name),
-                    "offered": self._last_offered.get(name),
-                    # Zaram's own packs are never trimmed — the budget exists
-                    # for strangers. Said here so the interface does not warn
-                    # about a built-in that was always going to be complete.
-                    "builtin": name in self._builtin,
-                }
-                for name, cfg in configured.items()
-            },
+            "servers": servers_info,
         }
+
+    def disconnect(self, server_id: str) -> None:
+        """Stop a server's process if Zaram started one. Its configuration is untouched."""
+        if server_id in self._builtin:
+            return  # a built-in lives in this process; it is hidden, never stopped
+        server = self._connections.pop(server_id, None)
+        if server is not None:
+            try:
+                server.close()
+            except Exception:  # noqa: BLE001 - stopping must never fail the caller
+                logger.warning("could not stop %s cleanly", server_id)
+
+    async def _check_cua_driver_health(self, server_id: str) -> Dict[str, Any]:
+        """Check cua-driver health via its built-in tools."""
+        cfg = self._configs().get(server_id)
+        if cfg is not None and not cfg.enabled:
+            return {"status": "off", "detail": "Switched off in Settings. Nothing is running."}
+        server = self._connections.get(server_id)
+        if server is None:
+            # Try to connect first
+            cfg = self._configs().get(server_id)
+            if cfg and cfg.reachable:
+                server = await self._connect(cfg)
+        if server is None:
+            return {"status": "not_connected", "reason": "Server not connected"}
+
+        # Read off `health_report`'s structured result, measured against cua-driver
+        # 0.34.1 on 10 October 2026: `overall` is "ok" when it can act, and each check
+        # carries a `status` of pass/skip/fail. The first version asked
+        # `perms.get("accessibility")` of the *raw* MCP result -- a key that is never
+        # there, on any platform -- so a working driver always read as "permissions
+        # needed (macOS)", on Windows too.
+        health: Dict[str, Any] = {"status": "unknown"}
+        try:
+            report = await asyncio.to_thread(server.call_tool, "health_report", {})
+            structured = (report or {}).get("structuredContent") or {}
+            checks = structured.get("checks") or []
+            failing = [c for c in checks if isinstance(c, dict) and c.get("status") == "fail"]
+            permission_failures = [c for c in failing if str(c.get("name", "")).startswith("tcc_")]
+            health["platform"] = structured.get("platform")
+            health["version"] = structured.get("driver_version")
+            if structured.get("overall") == "ok" and not failing:
+                health["status"] = "healthy"
+            elif permission_failures:
+                health["status"] = "permissions_needed"
+                health["detail"] = "; ".join(str(c.get("message", "")) for c in permission_failures)
+            elif failing:
+                health["status"] = "error"
+                health["error"] = "; ".join(str(c.get("message", c.get("name", ""))) for c in failing)
+            else:
+                health["status"] = "error"
+                health["error"] = f"the driver reported {structured.get('overall')!r} and no reason"
+        except Exception as e:
+            health["status"] = "error"
+            health["error"] = str(e)
+        return health
 
     # ------------------------------------------------------------ connection
 
@@ -344,6 +493,11 @@ class McpRuntime:
         """The tools worth putting in front of the model for this request."""
         found: List[ToolDescriptor] = []
         for cfg in self._configs().values():
+            if not cfg.enabled:
+                # Switched off in Settings: not listed, not connected, and a
+                # process left over from before it was switched off is stopped.
+                self.disconnect(cfg.server_id)
+                continue
             server = await self._connect(cfg)
             if server is None:
                 continue
@@ -404,17 +558,34 @@ class McpRuntime:
         # one, which is a stronger signal than a cap chosen by
         # measurement, and `max(0, …)` means the ranker is simply asked
         # for nothing rather than for a negative number.
+        #
+        # **Pins are paid for by the server they belong to -- 10 October 2026.**
+        # The budget left after pins used to be shared by every server, so one
+        # server with many pins starved all the others: the maintainer's Blender
+        # server has 28 pinned tools against a budget of 8, and while it was
+        # reachable cua-driver's tools could never reach the model whatever was
+        # asked -- installed, connected, healthy and silently absent, which is the
+        # failure this block exists to prevent. Servers with pins share what is
+        # left of the budget among their own other tools; servers without pins are
+        # ranked against the whole budget, exactly as when nobody pins anything.
+        pinned_servers = {t.server_id for t in pinned}
+        rest_of_pinned = [t for t in rest if t.server_id in pinned_servers]
+        rest_of_others = [t for t in rest if t.server_id not in pinned_servers]
         room = max(0, self._budget - len(pinned))
+
         # An empty query means "the same set as last time": the listing order
         # cut to the budget, with no ranking to move it. The engine asks this
         # way on every turn that is not about tools, so the tool rules are the
         # same bytes each turn and stay in the server's prompt cache
         # (`docs/PLAN.md` A3).
-        chosen = (
-            self._rank(query, rest, room)
-            if self._rank and query.strip() and room
-            else rest[:room]
-        )
+        def pick(candidates: List[ToolDescriptor], space: int) -> List[ToolDescriptor]:
+            if not candidates or not space:
+                return []
+            if self._rank and query.strip():
+                return self._rank(query, candidates, space)
+            return candidates[:space]
+
+        chosen = pick(rest_of_others, self._budget) + pick(rest_of_pinned, room)
         shortlisted = ours + pinned + chosen
 
         # Recorded here rather than computed later, because *here* is the only
@@ -510,6 +681,14 @@ class McpRuntime:
         cfg = self._configs().get(server_id)
         if cfg is None:
             return {"success": False, "error": f"no server called {server_id!r} is configured"}
+        if not cfg.enabled:
+            # Before the floors and the gate: a server that is off does nothing at
+            # all, whatever has been granted, and says why.
+            return {
+                "success": False,
+                "refused": True,
+                "reason": f"{server_id} is switched off in Settings, so Zaram did not run {tool_name}.",
+            }
 
         # **The floors, before the gate.** Argument-aware and one-directional:
         # a write to a file that governs Zaram is refused under any grant,
@@ -524,6 +703,7 @@ class McpRuntime:
 
         session_id = str(input_data.get("session") or "")
         decision = decide(
+            server_id=server_id,
             tool_name=tool_name,
             mode=self._effective_mode(server_id, tool_name, cfg),
             granted_tools=(
@@ -576,6 +756,7 @@ class McpRuntime:
                 "grantable": not (
                     looks_destructive(tool_name, input_data.get("annotations"))
                     or looks_outbound(tool_name)
+                    or always_asks(server_id, tool_name)
                 ),
                 # Which of the open project's switches covers this tool, so
                 # the permission card can offer *for this project* as a
@@ -585,6 +766,11 @@ class McpRuntime:
                 # the button-that-changes-nothing this file already
                 # refuses elsewhere.
                 "grant_scope": self._grant_scope(server_id, tool_name),
+                # Whether Zaram ships this server. A built-in is never in the
+                # store, so a standing "always" cannot be kept for it (the grant
+                # route answers 409); the card reads this rather than guessing
+                # from a name, and does not offer the button.
+                "builtin": server_id in self._builtin,
                 # Whether a yes for this one call may be offered. Not for a
                 # send: the card shows where a message goes and not what it
                 # says, and a send stays a draft until the person sends it.
@@ -597,13 +783,25 @@ class McpRuntime:
 
         try:
             result = await asyncio.to_thread(server.call_tool, tool_name, arguments)
+            # **An async built-in returns a coroutine from that thread, not an
+            # answer.** Found 10 October 2026: `zaram-self` -- the tools that
+            # change Zaram's own settings -- is async, and every call it has
+            # ever received came back `success: True` carrying an unawaited
+            # coroutine. Nothing was changed, the model was told it had been,
+            # and no test went through the runtime to see it.
+            if inspect.isawaitable(result):
+                result = await result
         except Exception as exc:  # noqa: BLE001
             return {"success": False, "error": f"{tool_name} failed: {exc}"}
 
         self._calls += 1
+        result, pictures = await asyncio.to_thread(keep_media, result)
         return {
             "success": True,
             "result": result,
+            # Paths in Zaram's own picture folder, for the step card and for a
+            # model that can see. See `keep_media`.
+            "images": pictures,
             # Carried so nothing downstream mistakes a server's output for
             # something Zaram said.
             "provenance": Provenance.TOOL_OUTPUT.value,
@@ -640,6 +838,34 @@ class McpRuntime:
         last instruction the model reads is still Zaram's.
         """
         parts: List[str] = []
+        # Zaram's own sentence about a desktop it has been told not to touch, so a
+        # request to act on the screen is answered "computer use is switched off"
+        # rather than with a model that quietly has no tools and improvises.
+        # CLAUDE.md: a disabled capability is visible, not silent.
+        desktops = [cfg for cfg in self._store.load().values() if "cua" in cfg.server_id.lower()]
+        off = [cfg.server_id for cfg in desktops if not cfg.enabled]
+        # The other half, found 10 October 2026: with it on, nothing said what it
+        # was for, and a model asked to "open google.com in your browser" did so
+        # and then replied "I can't browse the web myself -- I don't have a
+        # browser of my own", having just driven the person's. It also said the
+        # page was loading without looking. Zaram's own sentence, so it carries
+        # no tool description and widens nothing; the gate still judges each call.
+        if any(cfg.enabled for cfg in desktops) and not off:
+            parts.append(
+                "Computer use is on: you can work the person's own desktop with the desktop tools "
+                "listed below, and that includes the web browser they already have. To open a page, "
+                "open its address with the tool that launches apps; do not say you cannot browse or "
+                "have no browser of your own, because you are driving theirs. After opening or "
+                "acting, look before you say what happened: list the windows or read the window, "
+                "then report what you saw rather than what you expect. Looking costs nothing and "
+                "needs no permission, so do it instead of offering to.\n\n"
+            )
+        if off:
+            parts.append(
+                "Computer use (controlling the desktop) is switched off in Settings -> Computer Use. "
+                "If you are asked to click, type, open an app or look at the screen, say that it is "
+                "switched off and where to turn it on; do not claim to have done it.\n\n"
+            )
         for server_id in self._builtin:
             report = getattr(self._connections.get(server_id), "briefing", None)
             if not callable(report):

@@ -12,7 +12,19 @@ A model that can call tools decides for itself when to use one — you do not ha
 
 Some calls always ask, whatever you have granted: installing packages, deleting, and anything that sends something off this machine. The card for one of those offers **Run this once**: a yes to that single call. It runs, and the next call asks again. Pressing any of the buttons on the card carries the task on from where it stopped; the question is not asked again from the beginning.
 
+A local model can only read so many tool descriptions at once, so Zaram puts the handful that fit in front of it — about eight from servers you attached. If a server offers more than that, its row under **Settings → Tools** says how many did not reach the model, and you can choose which to keep there. A kept tool is only visible to the model; what it may *do* is still asked separately. Each server's kept tools come out of its own share, so keeping many of one server's tools never crowds out another's.
+
+To work your desktop — open apps, click, type — see *Computer use*.
+
 The terminal gets the same care as the named tools. Zaram reads the command line itself, so `npm install` asks whether it goes through the install runner or the terminal, and so does a command that deletes files or sends something off the machine.
+
+## Changing Zaram by asking
+
+You can change Zaram from the conversation: *open Settings*, *switch to the avatar*, *use the Michael voice*, *turn thinking off*, *prefer local models*, *call yourself Ada*, *turn computer use off*. Zaram does it with its own settings tools and tells you what is now set. The first time it changes something it asks, like any tool, and you can allow it for the conversation or for good.
+
+Two things always ask, however much you allowed before: **turning web search on**, because that lets questions leave your computer, and **allowing a tool for good**, so Zaram can never widen its own permissions. What may leave your computer — the kill switch, site rules and keys — is never changed by asking; those stay in **Settings → Privacy**.
+
+A voice has to be on your computer before Zaram can choose it. If it is not, Zaram says so and you download it in **Settings → Character → Voice**.
 
 ## Projects
 
@@ -42,6 +54,10 @@ What it made is under **Activity → Ran on its own**, each with **open** to the
 
 A local model stays loaded so the next answer is quick. **Settings → Models → Release the card** unloads it now, for a game or a render, and says what it could not unload. Closing Zaram does the same on its way out.
 
-## The summon key
+## The summon key and the edge handle
 
-**Ctrl+Shift+Space**, from any application, opens a small Zaram panel over what you are doing, with the text you had selected already in it. Zaram reads the selection when you press the key and at no other time; it never watches what you type. Anything you send from the panel is governed like anything else — if it would go to a cloud model, the panel says so first.
+**Ctrl+Shift+Space**, from any application, opens a small Zaram panel over what you are doing, with the text you had selected already in it. A thin handle on the right edge of your screen opens the same panel when you click it, empty — only the key brings your selection with it. Zaram reads the selection when you press the key and at no other time; it never watches what you type. Anything you send from the panel is governed like anything else — if it would go to a cloud model, the panel says so first.
+
+## Other assistants
+
+**Settings → Other assistants** lets another AI program — Claude Code, Cline, or anything that speaks MCP — use Zaram's memory: recall, remember and correct, scoped to a project, with sources. Press **Show a pairing code** and give the code to that program. It reaches nothing else — not the log, not the settings — every call it makes is recorded in Activity, and you can revoke it from the same place.

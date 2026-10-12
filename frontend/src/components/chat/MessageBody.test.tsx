@@ -100,7 +100,7 @@ describe('a reply rendered as the markdown it already is', () => {
       <MessageBody text={'See [the docs](https://example.com/page) for more.'} />,
     );
 
-    expect(container.querySelector('a')).toBeNull();
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('https://example.com/page');
     expect(container.textContent).toContain('the docs');
     expect(container.textContent).toContain('https://example.com/page');
   });

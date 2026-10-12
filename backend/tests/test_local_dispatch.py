@@ -260,23 +260,51 @@ class TestThePreloadSurvivesTheWrapper:
 
         assert engine.warm() is False
 
-    def test_a_second_local_server_is_not_warmed_by_generating(self):
-        """A one-token completion would load the weights and is still a
-        generation: it runs the model, appears in that server's log as a
-        request the user never made, and spends a hidden inference to remove a
-        wait nobody was asked about. `False` says so honestly, and the cold
-        start is still announced by `model_load` when the message arrives.
-        """
-        engine, ollama = _dispatch(
-            {"lm_studio:Qwen3.8-27B-exl3-2.20bpw": "http://127.0.0.1:1234"}
-        )
-        ollama.warm = lambda m, **kw: pytest.fail(
-            "a TabbyAPI model was warmed on Ollama — the exact confusion this "
-            "class exists to prevent"
-        )
-
-        assert engine.warm("lm_studio:Qwen3.8-27B-exl3-2.20bpw") is False
-
+    def test_a_second_local_server_is_asked_to_load_and_never_made_to_generate(self):
+        """A one-token completion would load the weights and is still a
+        generation: it runs the model, appears in that server's log as a
+        request the user never made. So the second server is *asked to load*
+        (`OpenAICompatibleEngine.load`, TabbyAPI's own route) and a server
+        without the route answers False. Either way Ollama is never involved
+        and nothing is generated -- see `test_a_second_server_is_loaded_at_launch.py`
+        for the route itself.
+        """
+        engine, ollama = _dispatch(
+            {"lm_studio:Qwen3.8-27B-exl3-2.20bpw": "http://127.0.0.1:1234"}
+        )
+        ollama.warm = lambda m, **kw: pytest.fail(
+            "a TabbyAPI model was warmed on Ollama — the exact confusion this "
+            "class exists to prevent"
+        )
+        asked: list = []
+
+        class _Server:
+            def load(self, model, **kw):
+                asked.append(model)
+                return True
+
+            def stream_response(self, *a, **k):  # pragma: no cover - must not be reached
+                pytest.fail("a preload generated")
+
+        engine._engine_for = lambda endpoint, wire: _Server()
+
+        assert engine.warm("lm_studio:Qwen3.8-27B-exl3-2.20bpw") is True
+        assert asked == ["Qwen3.8-27B-exl3-2.20bpw"]
+
+    def test_a_server_that_cannot_load_is_not_warmed_by_generating(self):
+        engine, ollama = _dispatch({"lm_studio:Q": "http://127.0.0.1:1234"})
+
+        class _NoRoute:
+            def load(self, model, **kw):
+                return False
+
+            def stream_response(self, *a, **k):  # pragma: no cover
+                pytest.fail("a preload generated")
+
+        engine._engine_for = lambda endpoint, wire: _NoRoute()
+
+        assert engine.warm("lm_studio:Q") is False
+
     def test_the_real_engine_stack_exposes_warm(self):
         """The guard the fake could never be.
 

@@ -42,7 +42,7 @@ Click the paperclip, or drop a file onto the conversation, or paste. Documents a
 
 ## Past conversations
 
-At the left edge of the conversation is a thin tab. Hover or click it to see past conversations, grouped by day. Click one to resume it; Zaram picks up where it left off. **New** starts a fresh one.
+At the left edge of the conversation is a thin tab. Hover over it for a quick look, or click it to keep the list open; click the tab again, or the **×** at the top of the list, to close it. Past conversations are grouped by day, and **Search what was said** finds one by anything said in it, not only its title. Click one to resume it; Zaram picks up where it left off. **New** starts a fresh one.
 
 ## Revise and Remember
 

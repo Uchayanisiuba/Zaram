@@ -32,7 +32,10 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from modules.motion.contracts import MotionScript
 
 
 class ArtifactKind(str, Enum):
@@ -73,6 +76,12 @@ class ArtifactKind(str, Enum):
     #: image in their HTML as a data URI and getting it back out is a base64
     #: decode either way.
     IMAGE = "image"
+    #: A motion graphics video generated from a MotionScript.
+    #: Uses WebM/VP9 for broad browser support. HTML preview wraps a <video> element.
+    VIDEO = "video"
+    #: A Presenton-generated presentation with designed layouts, themes, and components.
+    #: Distinct from DECK (outline-based) — this uses Presenton engine for designed slides.
+    PRESENTATION = "presentation"
 
 
 class Origin(str, Enum):
@@ -415,6 +424,10 @@ class Artifact:
 
     sources: List[ArtifactSource] = field(default_factory=list)
     claims: List[Claim] = field(default_factory=list)
+
+    #: The MotionScript that generated this video (for provenance and re-export).
+    #: Only present for VIDEO kind artifacts.
+    motion_script: "Optional[MotionScript]" = None
 
     #: Generated artifacts are indexed by default (rule 7b). The protection
     #: against Zaram citing its own restatements is origin tagging, not

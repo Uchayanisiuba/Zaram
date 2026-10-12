@@ -26,10 +26,17 @@
 import { create } from 'zustand';
 import { stuckLoopIn } from '@/lib/appFiles';
 import { checkFailedRequest } from '@/lib/askAboutPage';
+import { asFiles, asReply } from '@/lib/pageEdits';
 import { buildFrameDoc } from '@/lib/previewFrame';
-import { extractPreviewable, findStuckLoop } from '@/lib/previewableCode';
+import { findStuckLoop } from '@/lib/previewableCode';
+import { idsNamedIn, pictureMapFor, pictureNotes } from '@/lib/pagePictures';
+import { pageForTurn, startersNamedIn, type ReplyPage } from '@/lib/replyPage';
 import { checkPage } from '@/services/pageCheckClient';
 import { useChatStore } from '@/stores/chatStore';
+import { usePictureStore } from '@/stores/pictureStore';
+import { blockPhotoDescriptions, photoNotes, withPhotos } from '@/lib/pagePhotos';
+import { usePhotoStore } from '@/stores/photoStore';
+import { useStarterStore } from '@/stores/starterStore';
 
 /** Fixes asked for automatically, in a row, before the person is handed the failure. */
 export const MAX_AUTO_FIXES = 2;
@@ -46,6 +53,43 @@ export interface PageCheckState {
   attempt: number;
   /** Seconds the page held still at start-up, when that was worth saying. */
   slowSeconds: number;
+  /** Loops Zaram put a missing `++` back into, said under the reply. */
+  repaired?: string[];
+  /** The tested starting point the page was built on, if any. */
+  starter?: string;
+  /** Plain sentences about the person's pictures in the page: one that is no
+   *  longer attached, or a reference to a picture the page does not contain. */
+  pictures?: string[];
+}
+
+/** The page a reply stands for, with any starting point it names fetched
+ *  first. Resolved against the conversation so changes apply to the page
+ *  before them; a reply not in the conversation is read on its own. */
+async function pageOf(reply: string): Promise<ReplyPage | null> {
+  const turns = useChatStore.getState().messages;
+  let index = -1;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].role === 'assistant' && turns[i].text === reply) {
+      index = i;
+      break;
+    }
+  }
+  if (index < 0) return pageForTurn([{ role: 'assistant', text: reply }], 0, useStarterStore.getState().codes);
+  await useStarterStore.getState().ensure(startersNamedIn(turns.slice(0, index + 1)));
+  // The person's attached pictures this reply names are fetched first, so the
+  // page is checked with them in -- the page the preview will run.
+  const pictureStore = usePictureStore.getState();
+  const chat = useChatStore.getState();
+  await pictureStore.ensure(chat.sessionId, idsNamedIn(turns, index, turns[index].text), chat.conversationId);
+  const pictures = pictureMapFor(turns, index, usePictureStore.getState().held);
+  const page = pageForTurn(turns, index, useStarterStore.getState().codes, pictures);
+  // And the photographs it describes, looked up first for the same reason. The
+  // first search waits for the person's answer, so the check waits with it.
+  const descriptions = page ? blockPhotoDescriptions(page) : [];
+  if (!page || !descriptions.length) return page;
+  const asked = turns.slice(0, index).reverse().find((t) => t.role === 'user');
+  await usePhotoStore.getState().ensure(descriptions, asked?.text ?? '');
+  return withPhotos(page, usePhotoStore.getState().found);
 }
 
 interface PageCheckStore {
@@ -95,7 +139,7 @@ export const usePageCheckStore = create<PageCheckStore>((set, get) => {
 
     check: async (reply, question) => {
       if (!get().enabled) return;
-      const block = extractPreviewable(reply);
+      const block = await pageOf(reply);
       // SVG is a picture, not a program: nothing to start, nothing to hang.
       if (!block || block.language !== 'html') return;
       // **A whole page or an app, never a snippet.** An answer to "how do I
@@ -105,13 +149,27 @@ export const usePageCheckStore = create<PageCheckStore>((set, get) => {
       if (!block.files && !/<!doctype|<html[\s>]|<body[\s>]/i.test(block.code)) return;
       const key = replyKey(reply);
       if (get().byReply[key]) return;
-      put(key, { status: 'checking', note: '', attempt: 0, slowSeconds: 0 });
+      const notes = [...pictureNotes(block), ...photoNotes(block)];
+      const said = {
+        repaired: block.repaired ?? [],
+        starter: block.edited?.starter ?? '',
+        ...(notes.length ? { pictures: notes } : {}),
+      };
+      put(key, { status: 'checking', note: '', attempt: 0, slowSeconds: 0, ...said });
 
       // The one failure that is certain by reading the source needs no browser.
       const stuck = block.files ? stuckLoopIn(block.files, findStuckLoop) : findStuckLoop(block.code);
+      const missed = block.edited?.failed ?? [];
       let problems: string[];
       let seconds = 0;
-      if (stuck) {
+      if (missed.length) {
+        // A change that matched nothing leaves the page half-made; running it
+        // would report the half, not the cause.
+        problems = [
+          ...missed,
+          'Copy each SEARCH part exactly from the page as it stands now, or write that file out in full.',
+        ];
+      } else if (stuck) {
         const where = 'file' in stuck && stuck.file ? `${stuck.file}, line ${stuck.line}` : `line ${stuck.line}`;
         problems = [
           `${where}: \`${stuck.text}\` never changes its counter, so the page freezes before it draws anything. ` +
@@ -120,7 +178,7 @@ export const usePageCheckStore = create<PageCheckStore>((set, get) => {
       } else {
         const verdict = await checkPage(await buildFrameDoc(block));
         if (!verdict.checked) {
-          put(key, { status: 'unchecked', note: verdict.note, attempt: 0, slowSeconds: 0 });
+          put(key, { status: 'unchecked', note: verdict.note, attempt: 0, slowSeconds: 0, ...said });
           return;
         }
         if (verdict.ok) {
@@ -130,6 +188,7 @@ export const usePageCheckStore = create<PageCheckStore>((set, get) => {
             note: '',
             attempt: 0,
             slowSeconds: verdict.blockedSeconds >= 3 ? verdict.blockedSeconds : 0,
+            ...said,
           });
           return;
         }
@@ -140,7 +199,7 @@ export const usePageCheckStore = create<PageCheckStore>((set, get) => {
       const first = problems[0] ?? 'the page did not work';
       if (chain >= MAX_AUTO_FIXES) {
         chain = 0;
-        put(key, { status: 'gave-up', note: first, attempt: MAX_AUTO_FIXES, slowSeconds: seconds });
+        put(key, { status: 'gave-up', note: first, attempt: MAX_AUTO_FIXES, slowSeconds: seconds, ...said });
         return;
       }
       // Only while this reply is still the last word. If the person has asked
@@ -150,12 +209,16 @@ export const usePageCheckStore = create<PageCheckStore>((set, get) => {
       const chat = useChatStore.getState();
       const latest = chat.messages[chat.messages.length - 1];
       if (chat.isStreaming || !latest || latest.role !== 'assistant' || latest.text !== reply) {
-        put(key, { status: 'failed', note: first, attempt: 0, slowSeconds: seconds });
+        put(key, { status: 'failed', note: first, attempt: 0, slowSeconds: seconds, ...said });
         return;
       }
       chain += 1;
-      put(key, { status: 'fixing', note: first, attempt: chain, slowSeconds: seconds });
-      await chat.send(checkFailedRequest(problems, Boolean(block.files)), { revise: { question, reply } });
+      put(key, { status: 'fixing', note: first, attempt: chain, slowSeconds: seconds, ...said });
+      // The model is shown the page as it now stands -- its edits applied, its
+      // loops mended -- because its SEARCH lines have to match that, not the
+      // reply that described the changes.
+      const asItStands = block.edited || block.repaired ? asReply(block.files ?? asFiles(block.code)) : reply;
+      await chat.send(checkFailedRequest(problems, Boolean(block.files)), { revise: { question, reply: asItStands } });
     },
   };
 });

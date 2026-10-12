@@ -66,6 +66,9 @@ KNOWN_HOSTS: Dict[str, str] = {
     "davinci": "DaVinci Resolve — the edit page has its own undo history",
     "resolve": "DaVinci Resolve — the edit page has its own undo history",
     "figma": "Figma — every edit lands on the file's own undo history",
+    "cua-driver": "Cua Driver — background desktop automation via accessibility APIs; writes with confirmation",
+    "cua": "Cua Driver — background desktop automation via accessibility APIs; writes with confirmation",
+    "zaram-self": "Zaram Self — built-in settings control; changes apply immediately",
 }
 
 
@@ -109,6 +112,13 @@ class ServerConfig:
     #: any other — being visible to the model is not being permitted, and
     #: `granted_tools` is the separate field that answers that question.
     pinned_tools: Set[str] = field(default_factory=set)
+    #: Whether this server is switched on. **Off is not removed**: the program, its
+    #: grants and its pins are all kept, and nothing about it reaches the model or
+    #: runs until it is switched back on. Added 10 October 2026 for computer use,
+    #: where the only "off" had been Remove -- which forgot every grant and meant a
+    #: 30 MB download to undo. Written to the file only when false, so every existing
+    #: `mcp-servers.json` keeps meaning exactly what it meant.
+    enabled: bool = True
 
     @property
     def transport(self) -> str:
@@ -135,6 +145,8 @@ class ServerConfig:
             out["grantedTools"] = sorted(self.granted_tools)
         if self.pinned_tools:
             out["pinnedTools"] = sorted(self.pinned_tools)
+        if not self.enabled:
+            out["enabled"] = False
         return out
 
     @classmethod
@@ -166,6 +178,8 @@ class ServerConfig:
             writes=writes,
             granted_tools=set(raw.get("grantedTools") or []),
             pinned_tools=set(raw.get("pinnedTools") or []),
+            # Only an explicit `false` switches a server off; absent means on.
+            enabled=raw.get("enabled", True) is not False,
         )
 
 
@@ -213,6 +227,20 @@ class ServerStore:
             return
         cfg.granted_tools.add(tool_name)
         self.save(servers)
+
+    def set_enabled(self, server_id: str, enabled: bool) -> Optional[ServerConfig]:
+        """Switch a server on or off, keeping everything else about it.
+
+        ``None`` for a server that is not configured, which the caller turns into
+        a 404 rather than pretending it worked.
+        """
+        servers = self.load()
+        cfg = servers.get(server_id)
+        if cfg is None:
+            return None
+        cfg.enabled = bool(enabled)
+        self.save(servers)
+        return cfg
 
     def pin(self, server_id: str, tool_names: Set[str]) -> Optional[ServerConfig]:
         """Set which of a server's tools always reach the model.

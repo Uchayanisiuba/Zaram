@@ -191,6 +191,22 @@ describe('the new tab page', () => {
 });
 
 describe('the address bar', () => {
+  it('shows a failed load and retries the same address', async () => {
+    const navigate = vi.fn(async () => ({ ok: false, allow: true, error: 'ERR_CONNECTION_REFUSED' }));
+    await open({ navigate });
+    await user().type(screen.getByTestId('address-bar'), 'http://localhost:3000{Enter}');
+    await waitFor(() => expect(screen.getByTestId('browser-refusal').textContent).toContain('ERR_CONNECTION_REFUSED'));
+    await user().click(screen.getByRole('button', { name: 'Retry' }));
+    expect(navigate).toHaveBeenCalledTimes(2);
+    expect(navigate).toHaveBeenLastCalledWith('t1', 'http://localhost:3000');
+  });
+
+  it('reports a rejected desktop navigation call', async () => {
+    await open({ navigate: vi.fn(async () => { throw new Error('bridge disconnected'); }) });
+    await user().type(screen.getByTestId('address-bar'), 'http://localhost:3000{Enter}');
+    await waitFor(() => expect(screen.getByTestId('browser-refusal').textContent).toContain('bridge disconnected'));
+  });
+
   it('sends what was typed', async () => {
     const b = await open();
     await user().type(screen.getByTestId('address-bar'), 'example.com{Enter}');

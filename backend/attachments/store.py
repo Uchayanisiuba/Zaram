@@ -42,6 +42,7 @@ from __future__ import annotations
 import threading
 import uuid
 from collections import OrderedDict
+from dataclasses import replace
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -49,6 +50,7 @@ from core.paths import data_dir
 from ingest.parsers import parsers_for, supported_suffixes
 
 from .contracts import Attachment, AttachmentError, AttachmentKind
+from .pictures import page_name_for
 
 #: The directory attachments live in, under the data directory.
 #:
@@ -98,6 +100,9 @@ class AttachmentStore:
         self._lock = threading.Lock()
         #: Insertion-ordered, so eviction is oldest-first without a sort.
         self._items: "OrderedDict[str, Attachment]" = OrderedDict()
+        #: `(session, conversation)` pairs whose kept pictures were already
+        #: dealt with -- see `restore_pictures`. Memory only, like the rest.
+        self._seen: set = set()
         self._sweep()
 
     def _sweep(self) -> None:
@@ -234,6 +239,18 @@ class AttachmentStore:
         )
 
         with self._lock:
+            # Named under the lock so two pictures dropped together cannot be
+            # given the same name. Unique among this conversation's pictures
+            # only: a name freed by an eviction may be given again, and the
+            # window resolves a name to the newest picture that holds it.
+            taken = [
+                a.page_name
+                for a in self._items.values()
+                if a.session_id == session_id and a.kind == AttachmentKind.IMAGE.value
+            ]
+            attachment = replace(
+                attachment, page_name=page_name_for(name, suffix, taken)
+            )
             self._items[identifier] = attachment
             evicted = self._evict_locked(session_id)
         return attachment, evicted
@@ -282,7 +299,114 @@ class AttachmentStore:
                     found.append(item)
         return found, missing
 
+    # -- restoring ---------------------------------------------------------
+
+    def note_live(self, session_id: str, conversation_id: str) -> None:
+        """This session started ``conversation_id``, so nothing needs restoring.
+
+        Called when a conversation is opened by a request in this session. The
+        pictures it holds are the ones attached here; restoring the kept copies
+        as well would bring back one the person had removed or that was evicted.
+        """
+        with self._lock:
+            self._seen.add((session_id, conversation_id))
+
+    def restore_pending(self, session_id: str, conversation_id: str) -> bool:
+        """Whether this session has yet to be given ``conversation_id``'s pictures.
+
+        Asked first, so that the kept copies are only read from disk when they
+        are about to be used.
+        """
+        with self._lock:
+            return (session_id, conversation_id) not in self._seen
+
+    def restore_pictures(
+        self,
+        session_id: str,
+        conversation_id: str,
+        kept: "List[tuple[str, str, str, str, bytes]]",
+    ) -> List[Attachment]:
+        """Give a resumed conversation its pictures back, **once per session**.
+
+        ``kept`` is ``(kept id, original name, suffix, page name, bytes)`` for
+        each picture the conversation kept. After a restart, or when a
+        conversation is reopened from History, this session holds none of them,
+        and "make the photo bigger" would be asked of a model that was never
+        told the photo exists. Each is registered here under a **new** id (the
+        old one may still belong to another session in this process) with the
+        page name it already had, and ``kept_as`` says where it came from.
+
+        Skipped, not renamed, when the session already holds a picture with the
+        same page name -- the one just attached wins, as it does in the window.
+        Never evicts: only what fits within :data:`MAX_PER_SESSION` is restored,
+        the newest first, so restoring cannot push out something the person
+        attached a moment ago. The ones left out are simply not in this
+        session's scope, and a page that used them shows the placeholder.
+        """
+        with self._lock:
+            key = (session_id, conversation_id)
+            if key in self._seen:
+                return []
+            self._seen.add(key)
+            mine = [a for a in self._items.values() if a.session_id == session_id]
+            names = {a.page_name.lower() for a in mine if a.page_name}
+            room = MAX_PER_SESSION - len(mine)
+        restored: List[Attachment] = []
+        import base64
+
+        for kept_id, name, suffix, page_name, data in reversed(kept):
+            if room <= 0:
+                break
+            if not page_name or page_name.lower() in names:
+                continue
+            identifier = f"{PREFIX}{uuid.uuid4().hex[:12]}"
+            path = self._root / f"{identifier}{suffix}"
+            try:
+                path.write_bytes(data)
+            except OSError:
+                continue
+            restored.append(
+                Attachment(
+                    id=identifier,
+                    session_id=session_id,
+                    name=name,
+                    suffix=suffix,
+                    path=str(path),
+                    text="",
+                    parser="image",
+                    kind=AttachmentKind.IMAGE.value,
+                    data=base64.b64encode(data).decode("ascii"),
+                    page_name=page_name,
+                    kept_as=kept_id,
+                )
+            )
+            names.add(page_name.lower())
+            room -= 1
+        restored.reverse()
+        with self._lock:
+            for item in restored:
+                self._items[item.id] = item
+        return restored
+
     # -- removing ----------------------------------------------------------
+
+    def detach_pictures(self, kept_ids: List[str]) -> int:
+        """Drop live pictures that are, or were restored from, these kept ids.
+
+        What "remove this conversation's pictures" calls so that the working
+        copies do not go on serving what the person just removed.
+        """
+        wanted = set(kept_ids)
+        with self._lock:
+            ids = [
+                k
+                for k, v in self._items.items()
+                if v.kind == AttachmentKind.IMAGE.value and (k in wanted or v.kept_as in wanted)
+            ]
+            items = [self._items.pop(k) for k in ids]
+        for item in items:
+            Path(item.path).unlink(missing_ok=True)
+        return len(items)
 
     def remove(self, attachment_id: str) -> bool:
         """Detach one. The bytes go with it — this is working state."""

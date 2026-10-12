@@ -121,11 +121,11 @@ interface ProjectStore {
   setRoot: (id: string, root: string) => Promise<void>;
   /** Allow or withdraw file edits in a coding project's folder. The code
    *  pack's confirm-once, per project rather than per server. */
-  setWrites: (id: string, writes: boolean) => Promise<void>;
+  setWrites: (id: string, writes: boolean) => Promise<boolean>;
   /** Allow or withdraw running the project's detected commands. */
-  setRuns: (id: string, runs: boolean) => Promise<void>;
+  setRuns: (id: string, runs: boolean) => Promise<boolean>;
   /** Allow or withdraw driving the app in a browser. */
-  setDrives: (id: string, drives: boolean) => Promise<void>;
+  setDrives: (id: string, drives: boolean) => Promise<boolean>;
   /** Whether Zaram may run terminal commands in this project.
    *
    *  **The backend has had `set_shell` and a `shell` column since the
@@ -135,7 +135,7 @@ interface ProjectStore {
    *  the user grants it permission the permission is per project"* —
    *  was reachable only by editing the database. Found 4 October 2026
    *  while building the permission card that needed it. */
-  setShell: (id: string, shell: boolean) => Promise<void>;
+  setShell: (id: string, shell: boolean) => Promise<boolean>;
   /** All four at once — edit, run, drive, terminal — in one request.
    *
    *  The *build and run* switch. One request rather than four, so the row
@@ -326,9 +326,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     );
     if (typeof res === 'string') {
       set({ error: res });
-      return;
+      return false;
     }
     await get().load();
+    return true;
   },
 
   setBuildGrants: async (id, allowed) => {
@@ -362,9 +363,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     );
     if (typeof res === 'string') {
       set({ error: res });
-      return;
+      return false;
     }
     await get().load();
+    return true;
   },
 
   setDrives: async (id, drives) => {
@@ -380,9 +382,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     );
     if (typeof res === 'string') {
       set({ error: res });
-      return;
+      return false;
     }
     await get().load();
+    return true;
   },
 
   setShell: async (id, shell) => {
@@ -398,9 +401,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     );
     if (typeof res === 'string') {
       set({ error: res });
-      return;
+      return false;
     }
     await get().load();
+    return true;
   },
 
   fetchRunners: async (id) => {

@@ -77,8 +77,12 @@ def test_a_follow_up_to_a_page_gets_it_too():
     assert not wants_page_guidance("the floor collision doesn't work", "Your invoice is due Friday.")
 
 
-def test_it_asks_for_the_whole_page_when_changing_one():
-    assert "never only the changed lines" in PAGE_GUIDANCE
+def test_a_change_comes_back_as_edits_the_window_applies():
+    # 5 October: loose changed lines nobody could run. 11 October: the whole page
+    # again cost twenty minutes a change, so changes are SEARCH/REPLACE edits that
+    # the window applies -- the person still gets the whole page to run.
+    assert "SEARCH/REPLACE" in PAGE_GUIDANCE
+    assert "the person still gets the whole page" in PAGE_GUIDANCE
 
 
 def test_the_engine_reports_the_last_answer_of_a_session():
@@ -106,7 +110,7 @@ def test_it_describes_a_multi_file_app_without_a_project():
     assert "Name each file on its fence line" in PAGE_GUIDANCE
     assert "```js src/world.js" in PAGE_GUIDANCE
     assert "no project, terminal or install step" in PAGE_GUIDANCE
-    assert "every file again in full" in PAGE_GUIDANCE
+    assert "Name the file on the line above each block" in PAGE_GUIDANCE
 
 
 def test_it_asks_for_the_first_screen_before_heavy_work():

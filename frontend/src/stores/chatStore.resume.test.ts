@@ -72,6 +72,40 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('the pictures a reopened question carried', () => {
+  it('come back named, so a page the reply wrote can be given them', async () => {
+    fetchConversation.mockResolvedValue(
+      stored([
+        message({
+          id: 'u1',
+          role: 'user',
+          text: 'a site from this photo',
+          model: '',
+          locality: '',
+          attachments: [{ id: 'att_1', name: 'me.png', kind: 'image', pageName: 'me.png' }],
+        }),
+        message({ id: 'a1', text: '<img src="me.png">' }),
+      ]),
+    );
+
+    await useChatStore.getState().resumeConversation('conv_1');
+
+    const [question, reply] = useChatStore.getState().messages;
+    expect(question.attachments).toEqual([
+      { id: 'att_1', name: 'me.png', kind: 'image', pageName: 'me.png' },
+    ]);
+    expect(reply.attachments).toBeUndefined();
+  });
+
+  it('are left off a question that had none', async () => {
+    fetchConversation.mockResolvedValue(stored([message({ role: 'user', attachments: [] })]));
+
+    await useChatStore.getState().resumeConversation('conv_1');
+
+    expect(useChatStore.getState().messages[0].attachments).toBeUndefined();
+  });
+});
+
 describe('what a reopened reply carries', () => {
   it('brings back the tool calls', async () => {
     fetchConversation.mockResolvedValue(

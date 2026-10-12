@@ -574,3 +574,52 @@ describe('a loop that cannot end is found before it runs — 5 October 2026', ()
     expect(findStuckLoop(code)).toBeNull();
   });
 });
+
+describe('saving a page that uses the persons attached pictures', () => {
+  const JPEG = 'data:image/jpeg;base64,/9j/4AAQ';
+
+  it('writes one file with the picture in it, and the page on screen keeps its name', async () => {
+    const blobs: Blob[] = [];
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = ((given: Blob) => {
+      blobs.push(given);
+      return 'blob:stub';
+    }) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+    const shown = { language: 'html', label: 'HTML', code: '<img src="photo-1.jpg">', pictures: { 'photo-1.jpg': JPEG } };
+    try {
+      savePreviewable(shown);
+      expect(await blobs[0].text()).toBe(`<img src="${JPEG}">`);
+      expect(shown.code).toBe('<img src="photo-1.jpg">');
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  it('writes an app of several files with the picture inlined, because the save takes text', async () => {
+    const posted: { files: { path: string; content: string }[] }[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: { body: string }) => {
+      posted.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ path: 'C:/out/app' }), { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      await savePreviewable({
+        language: 'html',
+        label: 'App',
+        code: '<bundled/>',
+        files: [
+          { path: 'index.html', code: '<link rel="stylesheet" href="style.css"><h1>x</h1>' },
+          { path: 'style.css', code: '.hero{background:url(photo-1.jpg)}' },
+        ],
+        pictures: { 'photo-1.jpg': JPEG },
+      });
+      const css = posted[0].files.find((f) => f.path === 'style.css')!;
+      expect(css.content).toBe(`.hero{background:url(${JPEG})}`);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});

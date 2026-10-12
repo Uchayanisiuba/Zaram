@@ -330,6 +330,31 @@ class Floor:
     plan_may_cover: bool = True
 
 
+def zaram_self_floor(
+    server_id: str, tool_name: str, arguments: Mapping[str, Any]
+) -> Optional["Floor"]:
+    """`grant_tool` on Zaram's own settings server: always asks, names what it grants.
+
+    Added 10 October 2026. The server's other tools change a setting the person can
+    see; this one changes what Zaram may do without asking, and a model that could
+    call it under an ordinary grant could grant itself every other tool. Text the
+    model reads -- a document, a tool result -- can steer it into asking, which is
+    why the answer cannot rest on the model: `CLAUDE.md`, rule 6, and "nothing
+    retrieved may widen what a tool is allowed to do".
+    """
+    if server_id != "zaram-self" or tool_name != "grant_tool":
+        return None
+    target = str(arguments.get("tool_name") or "a tool")[:80]
+    where = str(arguments.get("server_id") or "a server")[:80]
+    return Floor(
+        "confirm",
+        f"This would let Zaram run {target} on {where} without asking again. "
+        "A permission is only ever given by you, so this always asks.",
+        grantable=False,
+        plan_may_cover=False,
+    )
+
+
 def floor_for(
     server_id: str,
     tool_name: str,
@@ -351,6 +376,18 @@ def floor_for(
     typed = terminal_floor(tool_name, arguments)
     if typed is not None:
         return typed
+
+    # A grant made by the model, for the model. Always the person's Go, on this
+    # call, and never rememberable: allowing `grant_tool` once must not let the
+    # model allow everything else without asking.
+    meta = zaram_self_floor(server_id, tool_name, arguments)
+    if meta is not None:
+        return meta
+
+    # cua-driver floors: sensitive computer-use actions
+    cua = cua_driver_floor(server_id, tool_name, arguments, root)
+    if cua is not None:
+        return cua
 
     target = write_target(tool_name, arguments)
     if target is None:
@@ -375,6 +412,109 @@ def floor_for(
             "This always asks, whatever has been granted.",
             grantable=False,
         )
+    return None
+
+
+# ------------------------------------------------------------------ cua-driver floors
+
+#: System-critical process names/patterns that should never be killed via cua-driver
+_SYSTEM_CRITICAL_PROCS = (
+    "system", "init", "kernel", "launchd", "winlogon", "csrss", "smss",
+    "services", "lsass", "svchost", "dwm", "explorer", "systemsettings",
+)
+
+#: Window frame operations that are sensitive (fullscreen, maximized, system windows)
+_SENSITIVE_FRAME_PATTERNS = ("fullscreen", "maximized", "system", "desktop", "taskbar")
+
+
+def cua_driver_floor(
+    server_id: str,
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    root: Optional[Path],
+) -> Optional[Floor]:
+    """Floor rules for cua-driver computer-use actions.
+
+    Only applies to the cua-driver server. These rules only ever make
+    verdicts stricter (refuse or confirm), never more permissive.
+    """
+    # Only apply to cua-driver servers
+    if "cua" not in server_id.lower() and "cua-driver" not in server_id.lower():
+        return None
+
+    # kill_app on system-critical processes → REFUSE
+    if tool_name == "kill_app":
+        pid = arguments.get("pid")
+        if pid is not None:
+            # We can't easily get process name from PID here, but we can warn
+            # The actual check would need process inspection; for now, confirm always
+            return Floor(
+                "confirm",
+                "Killing a process cannot be undone. This always asks.",
+                grantable=False,
+            )
+
+    # set_window_frame on sensitive windows → CONFIRM (always ask)
+    if tool_name == "set_window_frame":
+        # Arguments include frame geometry; we can't easily detect fullscreen/maximized
+        # without querying window state first. Always confirm for safety.
+        return Floor(
+            "confirm",
+            "Resizing or moving a window may disrupt your workflow. This always asks.",
+            grantable=True,
+        )
+
+    # clipboard_write with file URLs outside user directories → CONFIRM
+    if tool_name == "clipboard_write":
+        file_url = arguments.get("file_url") or arguments.get("path")
+        if file_url and isinstance(file_url, str):
+            # Check if path looks like it's outside user directories
+            import os
+            user_dir = os.path.expanduser("~")
+            try:
+                abs_path = os.path.abspath(file_url)
+                if not abs_path.startswith(user_dir):
+                    return Floor(
+                        "confirm",
+                        "Writing a file path outside your user directory to the clipboard "
+                        "could expose sensitive locations. This always asks.",
+                        grantable=True,
+                    )
+            except Exception:
+                pass
+
+    # browser_download writes files → CONFIRM (data leaves browser to disk)
+    if tool_name == "browser_download":
+        return Floor(
+            "confirm",
+            "Downloading a file writes it to your disk. This always asks.",
+            grantable=True,
+        )
+
+    # browser_set_input_files uploads files → CONFIRM (data leaves disk to browser)
+    if tool_name == "browser_set_input_files":
+        return Floor(
+            "confirm",
+            "Uploading a file sends it to a website. This always asks.",
+            grantable=False,
+        )
+
+    # end_session destroys session data → CONFIRM
+    if tool_name == "end_session":
+        return Floor(
+            "confirm",
+            "Ending a session destroys its recorded trajectory and cursor state. This always asks.",
+            grantable=False,
+        )
+
+    # stop_recording may lose recorded data → CONFIRM
+    if tool_name == "stop_recording":
+        return Floor(
+            "confirm",
+            "Stopping a recording finalizes it; any unsaved data may be lost. This always asks.",
+            grantable=False,
+        )
+
     return None
 
 

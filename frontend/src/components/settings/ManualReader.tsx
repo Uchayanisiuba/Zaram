@@ -1,7 +1,7 @@
 /**
  * The manual, readable — Settings → Help → Open the manual.
  *
- * The same ten pages the Zaram domain recalls from, for the person who wants
+ * The same pages the Zaram domain recalls from, for the person who wants
  * the page rather than the answer. Pages down the left, the page on the
  * right, rendered with the renderer the chat already uses so headings, lists
  * and pictures look like the rest of the product. Pictures come from the
@@ -18,6 +18,55 @@ import remarkGfm from 'remark-gfm';
 import { X } from 'lucide-react';
 
 import { fetchManual, fetchManualPage, manualAssetUrl, type ManualIndex } from '@/services/manualClient';
+
+/** A manual picture, fetched with the credential and shown from memory.
+ *
+ *  **An `<img src>` cannot carry the API credential**, and every backend route
+ *  requires it, so each picture came back 401 and the manual showed captions
+ *  with nothing above them -- in the dev app and the packaged one alike. Found
+ *  10 October 2026 while adding screenshots: the one picture that appeared had
+ *  been cached by an earlier authenticated fetch. `fetch` here is the app's own,
+ *  which `apiCredential` wraps; spoken replies load their audio the same way. */
+function ManualImage({ src, alt }: { src: string; alt: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    setUrl(null);
+    setFailed(false);
+    void (async () => {
+      try {
+        const res = await fetch(manualAssetUrl(src));
+        if (!res.ok) throw new Error(String(res.status));
+        const blob = await res.blob();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src]);
+
+  if (failed) {
+    return (
+      <p className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
+        The picture could not be loaded.
+      </p>
+    );
+  }
+  if (!url) {
+    // Holds the picture's space while it loads, so the page does not jump.
+    return <div aria-busy="true" style={{ aspectRatio: '16 / 10', borderRadius: 10, background: 'var(--color-glass)' }} />;
+  }
+  return <img src={url} alt={alt} style={{ maxWidth: '100%', borderRadius: 10 }} />;
+}
 
 export interface ManualReaderProps {
   onClose: () => void;
@@ -142,7 +191,7 @@ export default function ManualReader({ onClose, load = fetchManual, loadPage = f
                 components={{
                   img: ({ src, alt }) => (
                     <figure className="my-4">
-                      <img src={manualAssetUrl(String(src ?? ''))} alt={alt ?? ''} style={{ maxWidth: '100%', borderRadius: 10 }} />
+                      <ManualImage src={String(src ?? '')} alt={alt ?? ''} />
                       {alt && (
                         <figcaption className="text-xs mt-2" style={{ color: 'var(--color-text-faint)' }}>
                           {alt}

@@ -66,6 +66,16 @@ def _runtime(*, selected="ollama:qwen3-14b-16k:latest", manager=None) -> tuple[M
 GB = 1_000_000_000  # decimal, as the sentence the user reads shows it
 
 
+@pytest.fixture(autouse=True)
+def _no_chosen_default():
+    """The warm target is the person's chosen default when they set one, and the
+    settings object is shared across the session, so a test that sets one must
+    not hand it to the next."""
+    get_user_settings().set_default_model("")
+    yield
+    get_user_settings().set_default_model("")
+
+
 class TestPreferCloudMeansNoPreload:
     @pytest.mark.asyncio
     async def test_prefer_cloud_skips_and_says_why(self):
@@ -93,9 +103,16 @@ class TestPreferCloudMeansNoPreload:
         assert await runtime.warm_local_model() is True
 
 
-class TestAModelOnAnotherServerMeansNoPreload:
+class TestAModelOnAnotherServerIsTheOneWarmed:
+    """Changed 12 October 2026. This class used to assert a *refusal*: with the
+    chosen default on TabbyAPI, Ollama's pick must not be loaded beside it, so
+    nothing was. That kept the card safe and left the first message of every
+    session cold -- the maintainer's Qwen is on TabbyAPI. The same protection
+    now comes from warming the chosen default itself, so there is never a
+    second chat model."""
+
     @pytest.mark.asyncio
-    async def test_a_default_served_elsewhere_refuses_a_second_chat_model(self, monkeypatch):
+    async def test_the_chosen_default_is_warmed_and_ollamas_pick_is_not(self, monkeypatch):
         get_user_settings().set_routing_preference("auto")
         get_user_settings().set_default_model("Qwen3.8-27B-exl3-2.20bpw")
         runtime, engine = _runtime()
@@ -104,10 +121,28 @@ class TestAModelOnAnotherServerMeansNoPreload:
             lambda model: "http://127.0.0.1:1234" if "27B" in model else None,
         )
 
+        assert await runtime.warm_local_model() is True
+        assert engine.warmed == ["Qwen3.8-27B-exl3-2.20bpw"]
+        assert "ollama:qwen3-14b-16k:latest" not in engine.warmed
+        assert runtime.preload_skipped_because == ""
+
+    @pytest.mark.asyncio
+    async def test_prefer_cloud_still_loads_nothing_even_for_a_default_elsewhere(self):
+        get_user_settings().set_routing_preference("prefer_cloud")
+        get_user_settings().set_default_model("Qwen3.8-27B-exl3-2.20bpw")
+        runtime, engine = _runtime()
+
         assert await runtime.warm_local_model() is False
         assert engine.warmed == []
-        assert "another local server" in runtime.preload_skipped_because
-        assert "127.0.0.1:1234" in runtime.preload_skipped_because
+
+    @pytest.mark.asyncio
+    async def test_no_chosen_default_warms_the_runtimes_own_pick(self):
+        get_user_settings().set_routing_preference("auto")
+        get_user_settings().set_default_model("")
+        runtime, engine = _runtime()
+
+        assert await runtime.warm_local_model() is True
+        assert engine.warmed == ["ollama:qwen3-14b-16k:latest"]
 
     @pytest.mark.asyncio
     async def test_a_default_on_ollama_itself_preloads(self, monkeypatch):

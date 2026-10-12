@@ -110,7 +110,7 @@ describe('a page that does not work', () => {
     expect(send).toHaveBeenCalledTimes(3);
   });
 
-  it('asks for every file again when the page was an app of several', async () => {
+  it('asks for edits that name their file when the page was an app of several', async () => {
     const { usePageCheckStore } = await fresh();
     checkPage.mockResolvedValue(broken('oops'));
     const app =
@@ -118,16 +118,74 @@ describe('a page that does not work', () => {
       `${FENCE}js game.js\nboom();\n${FENCE}\n`;
     latest(app);
     await usePageCheckStore.getState().check(app, 'q');
-    expect((send.mock.calls[0] as unknown as [string])[0]).toContain('every file again in full');
+    expect((send.mock.calls[0] as unknown as [string])[0]).toContain('name the file above each block');
   });
 
   it('is read from the source when a loop cannot end, without starting a browser', async () => {
     const { usePageCheckStore, replyKey } = await fresh();
-    const reply = page('for (let i = 0; i < 16; i) { draw(i); }');
+    // `!=` says nothing about which way the loop counts, so it is not mended.
+    const reply = page('for (let i = 0; i != 16; i) { draw(i); }');
     await usePageCheckStore.getState().check(reply, 'q');
     expect(checkPage).not.toHaveBeenCalled();
     expect(usePageCheckStore.getState().byReply[replyKey(reply)].status).toBe('fixing');
     expect((send.mock.calls[0] as unknown as [string])[0]).toContain('never changes its counter');
+  });
+
+  it('mends a loop that lost its ++, says so, and runs the mended page', async () => {
+    const { usePageCheckStore, replyKey } = await fresh();
+    checkPage.mockResolvedValue(clean);
+    const reply = page('for (let i = 0; i < 16; i) { draw(i); }');
+    await usePageCheckStore.getState().check(reply, 'q');
+    expect(checkPage).toHaveBeenCalledTimes(1);
+    const state = usePageCheckStore.getState().byReply[replyKey(reply)];
+    expect(state.status).toBe('clean');
+    expect(state.repaired).toHaveLength(1);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('sends back the page as it now stands when a mended page still fails', async () => {
+    const { usePageCheckStore } = await fresh();
+    checkPage.mockResolvedValue(broken('draw is not defined'));
+    const reply = page('for (let i = 0; i < 16; i) { draw(i); }');
+    await usePageCheckStore.getState().check(reply, 'q');
+    const [, opts] = send.mock.calls[0] as unknown as [string, { revise: { reply: string } }];
+    expect(opts.revise.reply).toContain('i < 16; i++)');
+  });
+});
+
+describe('a page made of changes', () => {
+  const base = `${FENCE}html
+<html><body><script>const SPEED = 4;</script></body></html>
+${FENCE}`;
+  const change = (search: string) =>
+    `Faster.
+${FENCE}
+<<<<<<< SEARCH
+${search}
+=======
+const SPEED = 8;
+>>>>>>> REPLACE
+${FENCE}`;
+
+  it('is checked with the changes applied to the page before it', async () => {
+    const { usePageCheckStore } = await fresh();
+    checkPage.mockResolvedValue(clean);
+    const reply = change('const SPEED = 4;');
+    chat = { isStreaming: false, messages: [{ role: 'user', text: 'q' }, { role: 'assistant', text: base }, { role: 'user', text: 'faster' }, { role: 'assistant', text: reply }] };
+    await usePageCheckStore.getState().check(reply, 'faster');
+    expect(checkPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a change that matches nothing is sent back without running a half-made page', async () => {
+    const { usePageCheckStore, replyKey } = await fresh();
+    const reply = change('const SPEED = 5;');
+    chat = { isStreaming: false, messages: [{ role: 'user', text: 'q' }, { role: 'assistant', text: base }, { role: 'user', text: 'faster' }, { role: 'assistant', text: reply }] };
+    await usePageCheckStore.getState().check(reply, 'faster');
+    expect(checkPage).not.toHaveBeenCalled();
+    expect(usePageCheckStore.getState().byReply[replyKey(reply)].status).toBe('fixing');
+    const [text, opts] = send.mock.calls[0] as unknown as [string, { revise: { reply: string } }];
+    expect(text).toContain('not in the file as it stands');
+    expect(opts.revise.reply).toContain('const SPEED = 4;');
   });
 });
 

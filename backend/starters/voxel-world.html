@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxel World</title>
+<!--
+  Zaram starter: voxel-world. A small, light first-person block world:
+  walk, jump, mine and place blocks, with collision against every block.
+  Built to run beside a local model: one draw call per chunk, no lights,
+  no shadows, pixel ratio 1. Change the SETTINGS block first.
+-->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #87b9ee; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #start { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center;
+           gap: 14px; background: rgba(12, 16, 28, 0.78); color: #eef2f8; text-align: center; cursor: pointer; user-select: none; }
+  #start h1 { margin: 0; font-size: 44px; letter-spacing: 1px; }
+  #start .go { padding: 12px 28px; border-radius: 8px; background: #4f8df5; font-size: 18px; }
+  #start .keys { font-size: 13px; opacity: 0.75; max-width: 520px; line-height: 1.6; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; pointer-events: none; z-index: 5; }
+  #cross::before, #cross::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.9); }
+  #cross::before { left: 8px; top: 0; width: 2px; height: 18px; }
+  #cross::after { top: 8px; left: 0; height: 2px; width: 18px; }
+  #info { position: fixed; left: 10px; top: 8px; z-index: 5; color: #fff; font-size: 12px; text-shadow: 0 1px 2px #000; pointer-events: none; }
+  #hotbar { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 5; display: flex; gap: 4px;
+            padding: 4px; background: rgba(0, 0, 0, 0.45); border-radius: 6px; }
+  .slot { width: 40px; height: 40px; border: 2px solid rgba(255, 255, 255, 0.25); border-radius: 4px; position: relative;
+          image-rendering: pixelated; background-repeat: no-repeat; }
+  .slot.on { border-color: #fff; }
+  .slot span { position: absolute; right: 2px; bottom: 0; font-size: 10px; color: #fff; text-shadow: 0 1px 1px #000; }
+  #name { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); z-index: 5; color: #fff; font-size: 13px;
+          text-shadow: 0 1px 2px #000; pointer-events: none; }
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head>
+<body>
+<div id="start">
+  <h1>Voxel World</h1>
+  <div class="go">Click to play</div>
+  <div class="keys">WASD move · Mouse look · Space jump · Shift sprint · Left click mine · Right click place · 1–9 or wheel choose a block · Esc pause</div>
+</div>
+<div id="cross"></div>
+<div id="info"></div>
+<div id="name"></div>
+<div id="hotbar"></div>
+<script type="module">
+import * as THREE from 'three';
+
+// ---------------------------------------------------------------- SETTINGS
+const WORLD_X = 64, WORLD_Z = 64, WORLD_Y = 32;  // world size in blocks
+const CHUNK = 16;                                // chunk width used for meshing
+const SEA_LEVEL = 9;                             // water fills up to this height
+const SEED = 1337;                               // change for a different world
+const TREE_CHANCE = 0.012;                       // chance of a tree on a grass column
+const REACH = 6;                                 // how far away a block can be mined or placed
+const WALK_SPEED = 4.3, SPRINT_SPEED = 6.8, JUMP_SPEED = 7.6, GRAVITY = 24;
+const PLAYER_HEIGHT = 1.8, PLAYER_HALF_WIDTH = 0.3, EYE_HEIGHT = 1.62;
+const MOUSE_SENSITIVITY = 0.0022;
+const SKY = 0x87b9ee;
+
+// ------------------------------------------------------------------ BLOCKS
+// Each tile is a cell in the 4x4 texture atlas drawn below.
+const T = { grassTop: 0, grassSide: 1, dirt: 2, stone: 3, sand: 4, logSide: 5, logTop: 6, leaves: 7,
+            planks: 8, cobble: 9, glass: 10, water: 11, bedrock: 12 };
+const AIR = 0;
+const BLOCKS = [
+  null,
+  { name: 'Grass',       top: T.grassTop, side: T.grassSide, bottom: T.dirt },   // 1
+  { name: 'Dirt',        all: T.dirt },                                            // 2
+  { name: 'Stone',       all: T.stone },                                           // 3
+  { name: 'Sand',        all: T.sand },                                            // 4
+  { name: 'Wood',        top: T.logTop, side: T.logSide, bottom: T.logTop },       // 5
+  { name: 'Leaves',      all: T.leaves, see: true },                               // 6
+  { name: 'Planks',      all: T.planks },                                          // 7
+  { name: 'Cobblestone', all: T.cobble },                                          // 8
+  { name: 'Glass',       all: T.glass, see: true },                                // 9
+  { name: 'Water',       all: T.water, liquid: true },                             // 10
+  { name: 'Bedrock',     all: T.bedrock, unbreakable: true },                      // 11
+];
+const GRASS = 1, DIRT = 2, STONE = 3, SAND = 4, WOOD = 5, LEAVES = 6, WATER = 10, BEDROCK = 11;
+const HOTBAR = [1, 2, 3, 8, 7, 5, 6, 4, 9];   // what keys 1–9 place
+
+const solid = (id) => id !== AIR && !BLOCKS[id].liquid;
+const opaque = (id) => solid(id) && !BLOCKS[id].see;
+const tileOf = (id, face) => {
+  const b = BLOCKS[id];
+  if (b.all !== undefined) return b.all;
+  return face === 'top' ? b.top : face === 'bottom' ? b.bottom : b.side;
+};
+
+// -------------------------------------------------------------- RANDOMNESS
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hash2(x, z) {
+  let h = (x * 374761393 + z * 668265263 + SEED * 2147483647) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function valueNoise(x, z) {
+  const x0 = Math.floor(x), z0 = Math.floor(z);
+  const fx = x - x0, fz = z - z0;
+  const sx = fx * fx * (3 - 2 * fx), sz = fz * fz * (3 - 2 * fz);
+  const a = hash2(x0, z0), b = hash2(x0 + 1, z0), c = hash2(x0, z0 + 1), d = hash2(x0 + 1, z0 + 1);
+  return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sz;
+}
+function fbm(x, z) {
+  let sum = 0, amp = 1, freq = 1, norm = 0;
+  for (let o = 0; o < 4; o++) {
+    sum += valueNoise(x * freq, z * freq) * amp;
+    norm += amp; amp *= 0.5; freq *= 2;
+  }
+  return sum / norm;
+}
+
+// ------------------------------------------------------------------- WORLD
+const world = new Uint8Array(WORLD_X * WORLD_Y * WORLD_Z);
+const index = (x, y, z) => (y * WORLD_Z + z) * WORLD_X + x;
+const inside = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < WORLD_X && y < WORLD_Y && z < WORLD_Z;
+function getBlock(x, y, z) { return inside(x, y, z) ? world[index(x, y, z)] : AIR; }
+function setBlock(x, y, z, id) { if (inside(x, y, z)) world[index(x, y, z)] = id; }
+// Outside the world is a wall at the sides and solid ground below, so nobody falls out.
+function solidAt(x, y, z) {
+  if (y < 0) return true;
+  if (x < 0 || z < 0 || x >= WORLD_X || z >= WORLD_Z) return true;
+  if (y >= WORLD_Y) return false;
+  return solid(world[index(x, y, z)]);
+}
+
+function surfaceHeight(x, z) {
+  const n = fbm(x * 0.035, z * 0.035);
+  return Math.max(2, Math.min(WORLD_Y - 8, Math.floor(4 + n * 16)));
+}
+
+function generateWorld() {
+  const rand = mulberry32(SEED);
+  for (let x = 0; x < WORLD_X; x++) {
+    for (let z = 0; z < WORLD_Z; z++) {
+      const h = surfaceHeight(x, z);
+      for (let y = 0; y <= h; y++) {
+        let id = STONE;
+        if (y === 0) id = BEDROCK;
+        else if (y === h) id = h <= SEA_LEVEL + 1 ? SAND : GRASS;
+        else if (y > h - 4) id = h <= SEA_LEVEL + 1 ? SAND : DIRT;
+        setBlock(x, y, z, id);
+      }
+      for (let y = h + 1; y <= SEA_LEVEL; y++) setBlock(x, y, z, WATER);
+    }
+  }
+  // Trees, kept off the edges so their leaves stay inside the world.
+  for (let x = 3; x < WORLD_X - 3; x++) {
+    for (let z = 3; z < WORLD_Z - 3; z++) {
+      const h = surfaceHeight(x, z);
+      if (getBlock(x, h, z) !== GRASS || rand() > TREE_CHANCE) continue;
+      const trunk = 4 + Math.floor(rand() * 2);
+      for (let y = 1; y <= trunk; y++) setBlock(x, h + y, z, WOOD);
+      for (let dy = trunk - 1; dy <= trunk + 1; dy++) {
+        const r = dy === trunk + 1 ? 1 : 2;
+        for (let dx = -r; dx <= r; dx++) {
+          for (let dz = -r; dz <= r; dz++) {
+            if (Math.abs(dx) === r && Math.abs(dz) === r && rand() < 0.5) continue;
+            if (getBlock(x + dx, h + dy, z + dz) === AIR) setBlock(x + dx, h + dy, z + dz, LEAVES);
+          }
+        }
+      }
+    }
+  }
+}
+
+// ------------------------------------------------------------------- ATLAS
+// A 64x64 canvas of sixteen 16x16 pixel tiles, drawn once from code.
+const TILE = 16, ATLAS_TILES = 4;
+function drawAtlas() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = TILE * ATLAS_TILES;
+  const g = canvas.getContext('2d');
+  const rand = mulberry32(SEED + 7);
+  const px = (tile, x, y, r, gr, b, a = 1) => {
+    g.fillStyle = `rgba(${r | 0},${gr | 0},${b | 0},${a})`;
+    g.fillRect((tile % ATLAS_TILES) * TILE + x, Math.floor(tile / ATLAS_TILES) * TILE + y, 1, 1);
+  };
+  const noisy = (tile, [r, gr, b], spread) => {
+    for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
+      const k = 1 + (rand() - 0.5) * spread;
+      px(tile, x, y, r * k, gr * k, b * k);
+    }
+  };
+  noisy(T.grassTop, [96, 160, 64], 0.35);
+  noisy(T.dirt, [134, 96, 67], 0.3);
+  noisy(T.grassSide, [134, 96, 67], 0.3);
+  for (let x = 0; x < TILE; x++) {
+    const depth = 3 + Math.floor(rand() * 3);
+    for (let y = 0; y < depth; y++) px(T.grassSide, x, y, 96 * (0.85 + rand() * 0.3), 160 * (0.85 + rand() * 0.3), 64);
+  }
+  noisy(T.stone, [128, 128, 128], 0.3);
+  noisy(T.sand, [219, 207, 150], 0.15);
+  noisy(T.logSide, [104, 78, 46], 0.2);
+  for (let x = 0; x < TILE; x += 4) for (let y = 0; y < TILE; y++) px(T.logSide, x, y, 74, 55, 32);
+  noisy(T.logTop, [164, 132, 84], 0.15);
+  for (let r = 2; r < 8; r += 3) for (let a = 0; a < 64; a++) {
+    px(T.logTop, 8 + Math.round(Math.cos(a / 10.2) * r), 8 + Math.round(Math.sin(a / 10.2) * r), 120, 92, 56);
+  }
+  for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
+    if (rand() < 0.18) continue; // gaps, so leaves look like leaves
+    const k = 0.7 + rand() * 0.5;
+    px(T.leaves, x, y, 58 * k, 128 * k, 48 * k);
+  }
+  noisy(T.planks, [176, 136, 84], 0.12);
+  for (let y = 3; y < TILE; y += 4) for (let x = 0; x < TILE; x++) px(T.planks, x, y, 120, 88, 52);
+  noisy(T.cobble, [118, 118, 118], 0.45);
+  for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
+    const edge = x === 0 || y === 0 || x === TILE - 1 || y === TILE - 1;
+    if (edge || (x === y && x > 3 && x < 7)) px(T.glass, x, y, 210, 235, 245, 1);
+  }
+  noisy(T.water, [52, 102, 204], 0.12);
+  noisy(T.bedrock, [70, 70, 70], 0.7);
+  return canvas;
+}
+const atlasCanvas = drawAtlas();
+const atlas = new THREE.CanvasTexture(atlasCanvas);
+atlas.magFilter = THREE.NearestFilter;
+atlas.minFilter = THREE.NearestFilter;
+atlas.generateMipmaps = false;
+atlas.colorSpace = THREE.SRGBColorSpace;
+
+// ------------------------------------------------------------------ MESHES
+// The six faces of a cube: which neighbour each looks at, its corners, and a
+// baked light level, so no light has to be computed while playing.
+const FACES = [
+  { dir: [-1, 0, 0], face: 'side', light: 0.75, corners: [[0, 1, 0, 0, 1], [0, 0, 0, 0, 0], [0, 1, 1, 1, 1], [0, 0, 1, 1, 0]] },
+  { dir: [1, 0, 0], face: 'side', light: 0.75, corners: [[1, 1, 1, 0, 1], [1, 0, 1, 0, 0], [1, 1, 0, 1, 1], [1, 0, 0, 1, 0]] },
+  { dir: [0, -1, 0], face: 'bottom', light: 0.5, corners: [[1, 0, 1, 1, 0], [0, 0, 1, 0, 0], [1, 0, 0, 1, 1], [0, 0, 0, 0, 1]] },
+  { dir: [0, 1, 0], face: 'top', light: 1.0, corners: [[0, 1, 1, 1, 1], [1, 1, 1, 0, 1], [0, 1, 0, 1, 0], [1, 1, 0, 0, 0]] },
+  { dir: [0, 0, -1], face: 'side', light: 0.85, corners: [[1, 0, 0, 0, 0], [0, 0, 0, 1, 0], [1, 1, 0, 0, 1], [0, 1, 0, 1, 1]] },
+  { dir: [0, 0, 1], face: 'side', light: 0.85, corners: [[0, 0, 1, 0, 0], [1, 0, 1, 1, 0], [0, 1, 1, 0, 1], [1, 1, 1, 1, 1]] },
+];
+
+function faceVisible(id, neighbour) {
+  if (BLOCKS[id].liquid) return neighbour === AIR;              // only the water's surface
+  if (neighbour === AIR || BLOCKS[neighbour].liquid) return true;
+  if (BLOCKS[neighbour].see) return neighbour !== id || id === LEAVES;
+  return false;
+}
+
+function buildChunkGeometry(cx, cz, wantLiquid) {
+  const positions = [], uvs = [], colors = [], indices = [];
+  const eps = 0.001; // keeps neighbouring atlas tiles from bleeding in
+  for (let y = 0; y < WORLD_Y; y++) {
+    for (let z = cz; z < cz + CHUNK; z++) {
+      for (let x = cx; x < cx + CHUNK; x++) {
+        const id = getBlock(x, y, z);
+        if (id === AIR || !!BLOCKS[id].liquid !== wantLiquid) continue;
+        for (const f of FACES) {
+          const n = getBlock(x + f.dir[0], y + f.dir[1], z + f.dir[2]);
+          const outsideSide = !inside(x + f.dir[0], 0, z + f.dir[2]);
+          if (outsideSide || !faceVisible(id, n)) continue;
+          const tile = tileOf(id, f.face);
+          const u0 = (tile % ATLAS_TILES) / ATLAS_TILES, v0 = 1 - (Math.floor(tile / ATLAS_TILES) + 1) / ATLAS_TILES;
+          const size = 1 / ATLAS_TILES;
+          const start = positions.length / 3;
+          for (const [px, py, pz, u, v] of f.corners) {
+            positions.push(x + px, y + py, z + pz);
+            uvs.push(u0 + eps + u * (size - 2 * eps), v0 + eps + v * (size - 2 * eps));
+            colors.push(f.light, f.light, f.light);
+          }
+          indices.push(start, start + 1, start + 2, start + 2, start + 1, start + 3);
+        }
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(SKY);
+scene.fog = new THREE.Fog(SKY, 28, 72);
+const solidMaterial = new THREE.MeshBasicMaterial({ map: atlas, vertexColors: true, alphaTest: 0.5 });
+const waterMaterial = new THREE.MeshBasicMaterial({ map: atlas, vertexColors: true, transparent: true, opacity: 0.72, depthWrite: false });
+const chunks = new Map(); // "cx,cz" -> { solid, water }
+
+function rebuildChunk(cx, cz) {
+  const key = cx + ',' + cz;
+  const old = chunks.get(key);
+  if (old) {
+    scene.remove(old.solid, old.water);
+    old.solid.geometry.dispose();
+    old.water.geometry.dispose();
+  }
+  const solidMesh = new THREE.Mesh(buildChunkGeometry(cx, cz, false), solidMaterial);
+  const waterMesh = new THREE.Mesh(buildChunkGeometry(cx, cz, true), waterMaterial);
+  waterMesh.renderOrder = 1;
+  scene.add(solidMesh, waterMesh);
+  chunks.set(key, { solid: solidMesh, water: waterMesh });
+}
+
+// After a block changes, its chunk is rebuilt, and so is the neighbour it touches.
+function rebuildAround(x, z) {
+  const cx = Math.floor(x / CHUNK) * CHUNK, cz = Math.floor(z / CHUNK) * CHUNK;
+  rebuildChunk(cx, cz);
+  if (x % CHUNK === 0 && cx - CHUNK >= 0) rebuildChunk(cx - CHUNK, cz);
+  if (x % CHUNK === CHUNK - 1 && cx + CHUNK < WORLD_X) rebuildChunk(cx + CHUNK, cz);
+  if (z % CHUNK === 0 && cz - CHUNK >= 0) rebuildChunk(cx, cz - CHUNK);
+  if (z % CHUNK === CHUNK - 1 && cz + CHUNK < WORLD_Z) rebuildChunk(cx, cz + CHUNK);
+}
+
+// ------------------------------------------------------------------ RENDER
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'low-power' });
+renderer.setPixelRatio(1);
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 140);
+camera.rotation.order = 'YXZ';
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+const outline = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)),
+  new THREE.LineBasicMaterial({ color: 0x111111 })
+);
+outline.visible = false;
+scene.add(outline);
+
+// ------------------------------------------------------------------ PLAYER
+const player = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, pitch: 0, onGround: false };
+
+// Does a player standing with feet at (px, py, pz) overlap any solid block?
+function collides(px, py, pz) {
+  const x0 = Math.floor(px - PLAYER_HALF_WIDTH), x1 = Math.floor(px + PLAYER_HALF_WIDTH);
+  const y0 = Math.floor(py), y1 = Math.floor(py + PLAYER_HEIGHT - 0.001);
+  const z0 = Math.floor(pz - PLAYER_HALF_WIDTH), z1 = Math.floor(pz + PLAYER_HALF_WIDTH);
+  for (let x = x0; x <= x1; x++) {
+    for (let y = y0; y <= y1; y++) {
+      for (let z = z0; z <= z1; z++) {
+        if (solidAt(x, y, z)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Move along one axis; on contact, stop flush against the block that was hit.
+function moveAxis(axis, amount) {
+  if (amount === 0) return;
+  const p = player.pos;
+  const before = p[axis];
+  p[axis] += amount;
+  if (!collides(p.x, p.y, p.z)) return;
+  if (axis === 'y') {
+    if (amount < 0) { p.y = Math.floor(p.y) + 1; player.onGround = true; }
+    else p.y = Math.ceil(p.y + PLAYER_HEIGHT) - PLAYER_HEIGHT - 1 - 0.001;
+    player.vel.y = 0;
+  } else if (amount > 0) {
+    p[axis] = Math.floor(p[axis] + PLAYER_HALF_WIDTH) - PLAYER_HALF_WIDTH - 0.001;
+  } else {
+    p[axis] = Math.floor(p[axis] - PLAYER_HALF_WIDTH) + 1 + PLAYER_HALF_WIDTH + 0.001;
+  }
+  if (collides(p.x, p.y, p.z)) p[axis] = before; // a corner case: give the move back
+}
+
+function inWater() {
+  const p = player.pos;
+  return BLOCKS[getBlock(Math.floor(p.x), Math.floor(p.y + 0.4), Math.floor(p.z))]?.liquid === true;
+}
+
+function spawn() {
+  // The middle of the world, or the nearest dry column to it.
+  const cx = Math.floor(WORLD_X / 2), cz = Math.floor(WORLD_Z / 2);
+  let best = null;
+  for (let r = 0; r < Math.max(WORLD_X, WORLD_Z) && !best; r++) {
+    for (let dx = -r; dx <= r && !best; dx++) {
+      for (let dz = -r; dz <= r && !best; dz++) {
+        const x = cx + dx, z = cz + dz;
+        if (!inside(x, 0, z)) continue;
+        const h = surfaceHeight(x, z);
+        if (h > SEA_LEVEL && getBlock(x, h + 1, z) === AIR && getBlock(x, h + 2, z) === AIR) best = [x, h, z];
+      }
+    }
+  }
+  const [x, h, z] = best || [cx, surfaceHeight(cx, cz), cz];
+  player.pos.set(x + 0.5, h + 1, z + 0.5); // feet on the top of the ground block
+  player.vel.set(0, 0, 0);
+  player.onGround = true;
+}
+
+// ------------------------------------------------------------------- INPUT
+const keys = new Set();
+let playing = false, locked = false, everLocked = false, selected = 0;
+const startScreen = document.getElementById('start');
+
+function start() {
+  playing = true;
+  startScreen.style.display = 'none';
+  // Pointer lock is asked for, never relied on: where it is refused, the game
+  // still plays and the mouse looks by dragging.
+  try {
+    const asked = renderer.domElement.requestPointerLock();
+    if (asked && asked.catch) asked.catch(() => {});
+  } catch (e) { /* plays without it */ }
+}
+function pause() {
+  playing = false;
+  keys.clear();
+  startScreen.querySelector('.go').textContent = 'Click to continue';
+  startScreen.style.display = 'flex';
+}
+startScreen.addEventListener('click', start);
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === renderer.domElement;
+  if (locked) everLocked = true;
+  else if (everLocked && playing) pause();
+});
+
+window.addEventListener('keydown', (e) => {
+  if (!playing) return;
+  keys.add(e.code);
+  if (e.code.startsWith('Digit')) {
+    const n = Number(e.code.slice(5));
+    if (n >= 1 && n <= HOTBAR.length) choose(n - 1);
+  }
+  if (e.code === 'Escape' && !locked) pause();
+  if (e.code === 'Space') e.preventDefault();
+});
+window.addEventListener('keyup', (e) => keys.delete(e.code));
+window.addEventListener('blur', () => keys.clear());
+
+function look(dx, dy) {
+  player.yaw -= dx * MOUSE_SENSITIVITY;
+  player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch - dy * MOUSE_SENSITIVITY));
+}
+
+let drag = null; // where a press started, when the pointer is not locked
+renderer.domElement.addEventListener('mousedown', (e) => {
+  if (!playing) return;
+  if (locked) act(e.button);
+  else drag = { x: e.clientX, y: e.clientY, moved: false, button: e.button };
+});
+window.addEventListener('mousemove', (e) => {
+  if (!playing) return;
+  if (locked) look(e.movementX, e.movementY);
+  else if (drag) {
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    if (drag.moved) { look(dx * 2, dy * 2); drag.x = e.clientX; drag.y = e.clientY; }
+  }
+});
+window.addEventListener('mouseup', () => {
+  if (drag && !drag.moved) act(drag.button);
+  drag = null;
+});
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+window.addEventListener('wheel', (e) => {
+  if (playing) choose((selected + (e.deltaY > 0 ? 1 : HOTBAR.length - 1)) % HOTBAR.length);
+}, { passive: true });
+
+// --------------------------------------------------------- MINE AND PLACE
+// Walks the grid cell by cell along the view ray, so the first block hit is
+// exactly the one under the crosshair, and the cell before it is where a
+// placed block goes.
+function pick() {
+  const origin = camera.position;
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  let x = Math.floor(origin.x), y = Math.floor(origin.y), z = Math.floor(origin.z);
+  const stepX = Math.sign(dir.x), stepY = Math.sign(dir.y), stepZ = Math.sign(dir.z);
+  const tDeltaX = Math.abs(1 / dir.x), tDeltaY = Math.abs(1 / dir.y), tDeltaZ = Math.abs(1 / dir.z);
+  const frac = (v, s) => (s > 0 ? Math.floor(v) + 1 - v : v - Math.floor(v));
+  let tMaxX = stepX ? frac(origin.x, stepX) * tDeltaX : Infinity;
+  let tMaxY = stepY ? frac(origin.y, stepY) * tDeltaY : Infinity;
+  let tMaxZ = stepZ ? frac(origin.z, stepZ) * tDeltaZ : Infinity;
+  let prev = null, t = 0;
+  while (t <= REACH) {
+    const id = getBlock(x, y, z);
+    if (id !== AIR && !BLOCKS[id].liquid) return { hit: [x, y, z], before: prev };
+    prev = [x, y, z];
+    if (tMaxX < tMaxY && tMaxX < tMaxZ) { x += stepX; t = tMaxX; tMaxX += tDeltaX; }
+    else if (tMaxY < tMaxZ) { y += stepY; t = tMaxY; tMaxY += tDeltaY; }
+    else { z += stepZ; t = tMaxZ; tMaxZ += tDeltaZ; }
+  }
+  return null;
+}
+
+function act(button) {
+  const target = pick();
+  if (!target) return;
+  if (button === 0) {
+    const [x, y, z] = target.hit;
+    if (BLOCKS[getBlock(x, y, z)].unbreakable) return;
+    setBlock(x, y, z, AIR);
+    rebuildAround(x, z);
+  } else if (button === 2 && target.before) {
+    const [x, y, z] = target.before;
+    if (!inside(x, y, z)) return;
+    const was = getBlock(x, y, z);
+    setBlock(x, y, z, HOTBAR[selected]);
+    // Never place a block inside the player.
+    if (collides(player.pos.x, player.pos.y, player.pos.z)) { setBlock(x, y, z, was); return; }
+    rebuildAround(x, z);
+  }
+}
+
+// ------------------------------------------------------------------ HOTBAR
+const hotbar = document.getElementById('hotbar');
+const nameLabel = document.getElementById('name');
+const atlasUrl = atlasCanvas.toDataURL();
+HOTBAR.forEach((id, i) => {
+  const slot = document.createElement('div');
+  slot.className = 'slot';
+  const tile = tileOf(id, 'side');
+  slot.style.backgroundImage = `url(${atlasUrl})`;
+  slot.style.backgroundSize = `${ATLAS_TILES * 100}% ${ATLAS_TILES * 100}%`;
+  slot.style.backgroundPosition = `${(tile % ATLAS_TILES) * 100 / (ATLAS_TILES - 1)}% ${Math.floor(tile / ATLAS_TILES) * 100 / (ATLAS_TILES - 1)}%`;
+  slot.innerHTML = `<span>${i + 1}</span>`;
+  hotbar.appendChild(slot);
+});
+function choose(i) {
+  selected = i;
+  [...hotbar.children].forEach((s, k) => s.classList.toggle('on', k === i));
+  nameLabel.textContent = BLOCKS[HOTBAR[i]].name;
+}
+
+// -------------------------------------------------------------------- LOOP
+const info = document.getElementById('info');
+let last = 0, frames = 0, fpsTime = 0, fps = 0;
+
+function update(dt) {
+  // Movement is relative to where the player faces, flat on the ground.
+  const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+  const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+  const wish = new THREE.Vector3();
+  if (keys.has('KeyW')) wish.add(forward);
+  if (keys.has('KeyS')) wish.sub(forward);
+  if (keys.has('KeyD')) wish.add(right);
+  if (keys.has('KeyA')) wish.sub(right);
+  const swimming = inWater();
+  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? SPRINT_SPEED : WALK_SPEED) * (swimming ? 0.55 : 1);
+  if (wish.lengthSq() > 0) wish.normalize().multiplyScalar(speed);
+  player.vel.x = wish.x;
+  player.vel.z = wish.z;
+
+  if (swimming) {
+    player.vel.y = Math.max(player.vel.y - GRAVITY * 0.25 * dt, -2.5);
+    if (keys.has('Space')) player.vel.y = 3.2;
+  } else {
+    player.vel.y -= GRAVITY * dt;
+    if (keys.has('Space') && player.onGround) player.vel.y = JUMP_SPEED;
+  }
+
+  // Small steps, so a fast fall can never skip over a block.
+  player.onGround = false;
+  const steps = Math.max(1, Math.ceil(Math.max(Math.abs(player.vel.x), Math.abs(player.vel.y), Math.abs(player.vel.z)) * dt / 0.2));
+  const h = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    moveAxis('x', player.vel.x * h);
+    moveAxis('z', player.vel.z * h);
+    moveAxis('y', player.vel.y * h);
+  }
+}
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, last ? (now - last) / 1000 : 0); // a slow frame never becomes a big jump
+  last = now;
+  if (playing) update(dt);
+
+  camera.position.set(player.pos.x, player.pos.y + EYE_HEIGHT, player.pos.z);
+  camera.rotation.set(player.pitch, player.yaw, 0);
+
+  const target = playing ? pick() : null;
+  outline.visible = !!target;
+  if (target) outline.position.set(target.hit[0] + 0.5, target.hit[1] + 0.5, target.hit[2] + 0.5);
+
+  renderer.render(scene, camera);
+
+  frames++; fpsTime += dt;
+  if (fpsTime >= 0.5) { fps = Math.round(frames / fpsTime); frames = 0; fpsTime = 0; }
+  const p = player.pos;
+  info.textContent = `${fps} fps · x ${p.x.toFixed(1)} y ${p.y.toFixed(1)} z ${p.z.toFixed(1)}`;
+}
+
+// -------------------------------------------------------------------- BOOT
+generateWorld();
+for (let cx = 0; cx < WORLD_X; cx += CHUNK) {
+  for (let cz = 0; cz < WORLD_Z; cz += CHUNK) rebuildChunk(cx, cz);
+}
+spawn();
+choose(0);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

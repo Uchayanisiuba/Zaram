@@ -15,6 +15,7 @@ default and says so in the log — because the chat path predates this wiring an
 must not start depending on a network scan to come up.
 """
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -25,6 +26,7 @@ from .engines.ollama_engine import OllamaEngine
 from .engines.local_dispatch_engine import LocalDispatchEngine
 from .engines.openai_compatible_engine import from_environment as cloud_engine_from_environment
 from .engines.routed_engine import RoutedEngine
+from .engines.base_engine import ERROR_PREFIX
 from .models_service import ModelsService
 
 logger = logging.getLogger(__name__)
@@ -259,7 +261,8 @@ class ModelsRuntime(Runtime):
         # the first message paid the full cold start it was written to avoid.
         #
         # Nothing to warm is a fact worth logging, not a name worth guessing.
-        if not self._selected_model:
+        target = self._warm_target()
+        if not target:
             logger.info(
                 "[ModelsRuntime] No preload: no model was selected, and warming "
                 "the engine default would warm a model the user has not chosen."
@@ -276,7 +279,7 @@ class ModelsRuntime(Runtime):
         # On a 12 GB card that is 23 GB asked for, the driver paging GPU memory
         # over PCIe for every process, and a 14B split across GPU and CPU
         # pegging every core whenever anything touched it.
-        skipped = self._preload_refusal()
+        skipped = self._preload_refusal(target)
         if skipped:
             self.preload_skipped_because = skipped
             logger.info("[ModelsRuntime] No preload: %s", skipped)
@@ -295,23 +298,43 @@ class ModelsRuntime(Runtime):
 
         import asyncio
 
-        return await asyncio.to_thread(warm, self._selected_model)
+        return await asyncio.to_thread(warm, target)
 
-    def _preload_refusal(self) -> str:
+    def _warm_target(self) -> Optional[str]:
+        """The model the first question will be answered by, as far as it is known.
+
+        The person's chosen default when they set one, otherwise the runtime's
+        own pick. Warming `_selected_model` alone loaded **Ollama's** pick
+        beside a chosen model that lives on another server, which is why the
+        preload used to refuse in that case and load nothing at all: the
+        maintainer's Qwen is on TabbyAPI, so every session started cold.
+        The right model to warm was always the one that will answer.
+        """
+        try:
+            from core.user_settings import get_user_settings
+
+            chosen = (getattr(get_user_settings(), "default_model", None) or "").strip()
+        except Exception:  # noqa: BLE001 - a preference never blocks a preload
+            chosen = ""
+        return chosen or self._selected_model
+
+    def _preload_refusal(self, model: Optional[str] = None) -> str:
         """Why the selected model should not be preloaded now, or ``""``.
 
-        Three checks, in the order of how sure each one is:
+        Two checks, in the order of how sure each one is. (A third, "the chosen
+        default lives on another server", is gone: `_warm_target` now warms that
+        model itself rather than Ollama's pick beside it.)
+
 
         1. **The user prefers cloud.** Warming a local model they have asked
            not to use by default spends the card on nothing. They can still
            pick one by name, and it loads then — a cold start they chose,
            once, rather than 10 GB pinned all session for a preference they
            did not express.
-        2. **Their chosen default lives on another local server.** A second
-           server gets no preload (see `LocalDispatchEngine.warm`), but the
-           first one did, so Ollama's pick was loaded *beside* the model the
-           user actually answers with. Two chat models on one card is the
-           case this exists to refuse.
+        2. **Nothing else.** A chosen default on another local server used to
+           be a refusal, so that Ollama's pick was not loaded beside it. That
+           is now handled by what is warmed -- the chosen default itself -- so
+           there is no second chat model to refuse.
         3. **It does not fit in what is free now.** The residency gate sizes
            against the card's *total*; this is the only moment "what is free
            beside everything else running" is the right question, and it is
@@ -323,32 +346,17 @@ class ModelsRuntime(Runtime):
         provider layer that has not scanned yet, must not stop a preload that
         would otherwise have been right.
         """
+        model = model or self._warm_target()
         try:
             from core.user_settings import get_user_settings
 
             settings = get_user_settings()
             preference = getattr(getattr(settings, "routing_preference", None), "value", None)
-            chosen_default = getattr(settings, "default_model", None) or ""
         except Exception:  # noqa: BLE001 - a preference never blocks a preload
-            preference, chosen_default = None, ""
+            preference = None
 
         if preference == "prefer_cloud":
             return "routing prefers cloud, so the local model is loaded only when asked for"
-
-        if chosen_default:
-            # `_local_endpoint_for` answers a URL only for a model served by an
-            # OpenAI-compatible local server — LM Studio, TabbyAPI — and None
-            # for Ollama's own and for anything it cannot place.
-            try:
-                elsewhere = self._local_endpoint_for(chosen_default)
-            except Exception:  # noqa: BLE001 - see the docstring
-                elsewhere = None
-            if elsewhere:
-                return (
-                    f"the chosen model ({chosen_default}) is served by another local "
-                    f"server at {elsewhere}; loading a second chat model beside it "
-                    "would not fit"
-                )
 
         # **A model that is already on the card is not asked to fit.** "Does it
         # fit in what is free" is a question about loading, and what is free
@@ -360,7 +368,7 @@ class ModelsRuntime(Runtime):
         # a separate fix. Nothing is skipped here: the warm that follows is a
         # cheap refresh for a model that is loaded, and a no-op for one on
         # another server.
-        if self._already_resident(self._selected_model):
+        if self._already_resident(model):
             return ""
 
         free = None
@@ -369,10 +377,10 @@ class ModelsRuntime(Runtime):
                 free = self._free_vram_probe()
             except Exception:  # noqa: BLE001
                 free = None
-        size = self._model_size_bytes(self._selected_model)
+        size = self._model_size_bytes(model)
         if free is not None and size is not None and size > free:
             return (
-                f"{self._selected_model} needs {size / 1e9:.1f} GB and the card has "
+                f"{model} needs {size / 1e9:.1f} GB and the card has "
                 f"{free / 1e9:.1f} GB free beside what is already running"
             )
         return ""
@@ -417,6 +425,31 @@ class ModelsRuntime(Runtime):
         info = self._catalogued(model) if model else None
         size = getattr(info, "size_bytes", None) if info is not None else None
         return int(size) if isinstance(size, (int, float)) and size > 0 else None
+
+    async def complete(
+        self, user_prompt: str, system_prompt: str = "", model: Optional[str] = None
+    ) -> str:
+        """One whole answer, for a module that is not a chat turn.
+
+        Goes through the same routed engine a chat turn does, so a cloud model is
+        gated and logged and a local one stays local. ``model=None`` is the
+        provider layer's own vetted selection -- never a name written into the
+        caller. An engine reports failure as a chunk prefixed with
+        ``ERROR_PREFIX``; that is raised here, because a caller that parsed the
+        error text as its answer would be inventing one.
+        """
+        if self._service is None:
+            raise RuntimeError("the models runtime is not ready")
+        service = self._service
+
+        def _run() -> str:
+            return "".join(service.generate_response(user_prompt, system_prompt, model))
+
+        text = await asyncio.to_thread(_run)
+        if ERROR_PREFIX in text:
+            detail = text.split(ERROR_PREFIX, 1)[1].strip()
+            raise RuntimeError(detail or "the model could not answer")
+        return text
 
     def reload_engine(self) -> bool:
         """Rebuild the engine from the current configuration. Returns whether cloud is present.

@@ -74,7 +74,7 @@ interface Props {
 }
 
 export default function PermissionCard({ call, onAllowed }: Props) {
-  const [state, setState] = useState<'idle' | 'working' | 'failed' | 'denied'>('idle');
+  const [state, setState] = useState<'idle' | 'working' | 'allowed' | 'failed' | 'denied'>('idle');
   const sessionId = useChatStore((s) => s.sessionId);
   const projectId = useChatStore((s) => s.projectId);
   const setWrites = useProjectStore((s) => s.setWrites);
@@ -89,6 +89,15 @@ export default function PermissionCard({ call, onAllowed }: Props) {
   // Only when there is a project to grant *on*. A switch with nowhere to
   // live is the control that settles nothing.
   const canGrantProject = Boolean(call.grantable && scope && projectId && SWITCH_LABEL[scope]);
+  // *Always* is not a rung for a tool a project switch governs. A built-in
+  // has no standing grant to write -- the backend answers 409 for one, and
+  // before that a bare 404 the card read as "did not save" -- and a by-name
+  // grant would in any case outlive the switch the person was told is where
+  // they withdraw it. The project rung is the lasting yes for these.
+  // The same goes for any built-in server, scoped or not (web, draw, jobs):
+  // the signal is the gate's own `builtin`, never a guess from a name. Only
+  // an attached MCP server, which lives in the store, can keep an "always".
+  const canAlways = Boolean(call.grantable && !scope && !call.builtin);
 
   async function press(how: 'session' | 'project' | 'always') {
     setState('working');
@@ -103,10 +112,17 @@ export default function PermissionCard({ call, onAllowed }: Props) {
           scope
         ];
         if (!flip) throw new Error(`no switch called ${scope}`);
-        await flip(projectId, true);
+        // `false` is the store saying the PATCH failed. It does not throw,
+        // so without this a switch that never turned on looked like one that
+        // had, the call was retried, and the card came straight back.
+        if ((await flip(projectId, true)) === false) throw new Error('switch not saved');
       } else {
         await grantTool(call.server, call.tool);
       }
+      // Settled rather than left on "Saving…": this card stays in the
+      // transcript after the task carries on, and a spinner that never ends
+      // reads as a press that did nothing.
+      setState('allowed');
       onAllowed(call.heldTask ? { planId: call.heldTask, runHeld: false } : undefined);
     } catch {
       // Said on the card rather than thrown away: a grant that failed
@@ -115,7 +131,7 @@ export default function PermissionCard({ call, onAllowed }: Props) {
     }
   }
 
-  const busy = state === 'working';
+  const busy = state === 'working' || state === 'allowed';
   const canRunOnce = Boolean(call.once && call.heldTask);
 
   function runOnce() {
@@ -221,16 +237,18 @@ export default function PermissionCard({ call, onAllowed }: Props) {
                   </button>
                 )}
 
-                <button
-                  type="button"
-                  data-testid="allow-tool"
-                  disabled={busy}
-                  onClick={() => void press('always')}
-                  className="rounded-lg px-3 py-1.5 text-xs disabled:opacity-40"
-                  style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
-                >
-                  Always
-                </button>
+                {canAlways && (
+                  <button
+                    type="button"
+                    data-testid="allow-tool"
+                    disabled={busy}
+                    onClick={() => void press('always')}
+                    className="rounded-lg px-3 py-1.5 text-xs disabled:opacity-40"
+                    style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
+                  >
+                    Always
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -239,15 +257,21 @@ export default function PermissionCard({ call, onAllowed }: Props) {
             {/* Each press says what it costs, because the span is the
                 decision. "Always" without "stops asking everywhere" is the
                 offer without the deal. */}
-            {busy
+            {state === 'working'
               ? 'Saving…'
-              : state === 'failed'
+              : state === 'allowed'
+                ? 'Allowed — carrying on.'
+                : state === 'failed'
                 ? 'That did not save — try again, or allow it in Settings → Tools.'
                 : !call.grantable
                   ? 'Zaram asks about this one every time, however much is allowed — it cannot be undone.'
                   : canGrantProject
-                    ? `“This project” turns on ${SWITCH_LABEL[scope]}, and you can withdraw it in Project. “Always” stops Zaram asking anywhere.`
-                    : '“Always” stops Zaram asking about this tool anywhere. You can withdraw it in Settings → Tools.'}
+                    ? `“This project” turns on ${SWITCH_LABEL[scope]}, and you can withdraw it in Project.`
+                    : scope
+                      ? 'Allow it for this conversation, or open a project to allow it for the project.'
+                      : call.builtin
+                        ? 'Allow it for this conversation. This one is built in, so it has no standing “always”.'
+                        : '“Always” stops Zaram asking about this tool anywhere. You can withdraw it in Settings → Tools.'}
           </p>
         </div>
       </div>

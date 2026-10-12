@@ -295,7 +295,7 @@ class TestEveryRealFileIsAccountedFor:
                     # allow-list", which is what this test's message otherwise
                     # advises. That advice would put 6.9 GB in the installer.
                     continue
-                if suffix in {".bat", ".md", ".log", ".pyc"}:
+                if suffix in {".bat", ".md", ".log", ".pyc"} or (".log." in name and suffix[1:].isdigit()):  # rotated logs: ollama.log.1
                     continue  # tooling and notes; not needed at runtime
                 if name == "api-secret":
                     # The API credential's development fallback. It has no

@@ -14,6 +14,21 @@ Choose **Avatar** under Settings → Appearance and replies are spoken. Press th
 
 Dictated figures are marked for checking — *four twenty five* has been heard as *$425* and as *₦425*, and an invoice does not forgive that.
 
+## Choosing a voice
+
+![Settings → Character → Voice, with the voice list open: Test and Use beside the voices on this machine, Download beside the rest.](assets/voices.png)
+
+Zaram speaks with **Kokoro**, which runs on your computer's processor and so does not compete with a local model for the graphics card. It has 54 voices. Open **Settings → Character → Voice → Browse 54 voices** to see them all, grouped by language:
+
+- **Test** plays a short sample in that voice. Nothing changes.
+- **Use** makes it the voice that speaks your replies. The one speaking now is marked *speaking*.
+- **Download** fetches a voice that is not on your computer yet — about half a megabyte each, from huggingface.co. Pressing it is your permission for that one file, and it is logged in Activity. A downloaded voice is not chosen until you press Use, so you can collect a few and compare.
+- A greyed voice needs a language pack — Japanese or Chinese, for example — and says which.
+
+The line above the list names the speech engines. Kokoro is the only one built; the others are listed so you can see what is planned, and none of them can speak yet.
+
+**Settings → Voice Engine → Local Voice Cleanup** removes the voices you downloaded and are not using, keeping the one that speaks now. It shows how many it would remove first.
+
 ## The packs
 
 ![Settings → Packs: each pack with what it turns on, its size, and one button.](assets/packs.png)

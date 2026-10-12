@@ -167,3 +167,23 @@ class TestTheGuessIsStillOneDirectional:
         assert looks_read_only("frobnicate") is False
         decision = decide(tool_name="frobnicate", mode=WriteMode.HOST_UNDO)
         assert decision.verdict is Verdict.CONFIRM
+
+
+
+class TestInflectionsAreTheSameWordAndLongerWordsAreNot:
+    """10 October 2026. The prefix rule read `browser` as `browse` + "r", which put
+    every `browser_*` tool and `open_in_browser` back in "reads only"."""
+
+    def test_a_browser_is_not_a_look(self):
+        from runtimes.mcp.policy import looks_read_only
+
+        for name in ("open_in_browser", "browser_navigate", "browserClick", "launch-browser"):
+            assert looks_read_only(name) is False, name
+
+    def test_inflections_still_match(self):
+        from runtimes.mcp.policy import looks_destructive, looks_read_only
+
+        for name in ("deletes_rows", "deleted_items", "deleteAll", "removing_items", "purged_cache"):
+            assert looks_destructive(name) is True, name
+        for name in ("fetching_rows", "searches", "browsed_pages", "describes_scene"):
+            assert looks_read_only(name) is True, name

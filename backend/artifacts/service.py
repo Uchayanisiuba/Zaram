@@ -30,10 +30,15 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Any, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence, TYPE_CHECKING
 
 from . import export
-from .contracts import Artifact, ArtifactKind, ArtifactSource, Claim
+from .contracts import Artifact, ArtifactKind, ArtifactSource, Claim, ImageBlock
+
+if TYPE_CHECKING:
+    from modules.motion.contracts import MotionScript
+    from modules.presenton.contracts import PresentationScript
+
 from .html import (
     render_chart,
     render_cv,
@@ -70,6 +75,10 @@ DEFAULT_FORMAT = {
     # A picture is a picture. `ChartExporter` handles the extension for both
     # image kinds, because both embed the PNG in their HTML the same way.
     ArtifactKind.IMAGE: "png",
+    # Motion video uses WebM for broad browser support.
+    ArtifactKind.VIDEO: "webm",
+    # Presenton presentation uses PPTX (editable) with PDF as alternative.
+    ArtifactKind.PRESENTATION: "pptx",
 }
 
 
@@ -171,6 +180,7 @@ class ArtifactService:
         conversation_title: str = "",
         sources: Sequence[ArtifactSource] = (),
         claims: Sequence[Claim] = (),
+        slide_images: "Optional[Mapping[int, ImageBlock]]" = None,
     ) -> Artifact:
         """Slides, authored as an outline.
 
@@ -185,6 +195,7 @@ class ArtifactService:
             subtitle=subtitle,
             sources=sources,
             claims=claims,
+            slide_images=slide_images,
         )
         return self._persist(
             html=html,
@@ -217,6 +228,7 @@ class ArtifactService:
         conversation_title: str = "",
         sources: Sequence[ArtifactSource] = (),
         claims: Sequence[Claim] = (),
+        photo: "Optional[ImageBlock]" = None,
     ) -> Artifact:
         """A CV, in the layout a CV is read in — see `render_cv`.
 
@@ -234,6 +246,7 @@ class ArtifactService:
             skills=list(skills),
             sources=sources,
             claims=claims,
+            photo=photo,
         )
         return self._persist(
             html=html,
@@ -468,6 +481,7 @@ class ArtifactService:
         sources: Sequence[ArtifactSource],
         claims: Sequence[Claim],
         store: Optional[Any] = None,
+        motion_script: "Optional[MotionScript]" = None,
     ) -> Artifact:
         extension = fmt or DEFAULT_FORMAT[kind]
         # Documents go to the output folder, which is what the user asked for
@@ -485,6 +499,7 @@ class ArtifactService:
             conversation_title=conversation_title,
             sources=list(sources),
             claims=list(claims),
+            motion_script=motion_script,
         )
 
         # File first. `export.write` goes through ArtifactStore, which creates
@@ -569,6 +584,101 @@ class ArtifactService:
         export.write(copy, fmt, self._store, filename=copy.filename)
         self._records.put(copy)
         return copy
+
+    def create_presentation(
+        self,
+        *,
+        title: str,
+        script: "PresentationScript",
+        pptx_bytes: bytes,
+        filename: str = "",
+        project_id: str = "",
+        conversation_id: str = "",
+        conversation_title: str = "",
+        sources: Sequence[ArtifactSource] = (),
+        claims: Sequence[Claim] = (),
+    ) -> Artifact:
+        """A Presenton-generated presentation, recorded like every other artifact."""
+        # Render HTML preview for Work surface (lightweight slide thumbnails)
+        html = _render_presentation_preview(title, script)
+
+        return self._persist(
+            html=html,
+            title=title,
+            filename=filename or f"{title[:50]}.pptx",
+            kind=ArtifactKind.PRESENTATION,
+            fmt="pptx",
+            project_id=project_id,
+            conversation_id=conversation_id,
+            conversation_title=conversation_title,
+            sources=sources,
+            claims=claims,
+        )
+
+    def create_video(
+        self,
+        *,
+        title: str,
+        video_bytes: bytes,
+        duration_ms: int,
+        width: int,
+        height: int,
+        fps: int,
+        script: "MotionScript",
+        filename: str = "",
+        project_id: str = "",
+        conversation_id: str = "",
+        conversation_title: str = "",
+        sources: Sequence[ArtifactSource] = (),
+        claims: Sequence[Claim] = (),
+    ) -> Artifact:
+        """A generated motion video, recorded like every other artifact."""
+        # Render HTML wrapper with <video> tag for preview using download URL
+        # The artifact_id will be set after persistence, so we use a placeholder
+        # that will be replaced by the frontend
+        html = _render_video_html(title, "{artifact_id}")
+
+        return self._persist(
+            html=html,
+            title=title,
+            filename=filename,
+            kind=ArtifactKind.VIDEO,
+            fmt="webm",
+            project_id=project_id,
+            conversation_id=conversation_id,
+            conversation_title=conversation_title,
+            sources=sources,
+            claims=claims,
+            motion_script=script,
+        )
+
+
+def _render_video_html(title: str, artifact_id: str) -> str:
+    """Render HTML wrapper with <video> tag for motion preview.
+    
+    Uses download URL instead of base64 to avoid memory bloat.
+    The frontend will fetch the video via the download endpoint.
+    """
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{title}</title></head>
+<body style="margin:0;background:#0b1120;display:flex;align-items:center;justify-content:center;height:100vh;">
+<video controls style="max-width:100%;max-height:100%;" data-download-url="/artifacts/{artifact_id}/download"></video>
+<script>
+  // Frontend will replace data-download-url with actual URL and set src
+  const video = document.querySelector('video');
+  video.src = video.dataset.downloadUrl;
+</script>
+</body></html>"""
+
+
+def _render_presentation_preview(title: str, script: "PresentationScript") -> str:
+    """Render lightweight HTML preview of a Presenton presentation.
+    
+    Shows slide thumbnails with layout info — no Presenton CLI needed.
+    Used for in-conversation artifact cards and Work surface.
+    """
+    from modules.presenton.preview import render_preview_html
+    return render_preview_html(script)
 
 
 def _slug(title: str) -> str:

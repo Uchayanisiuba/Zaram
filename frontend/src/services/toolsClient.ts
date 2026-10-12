@@ -74,6 +74,9 @@ export interface ToolServer {
    *  answer to what a tool may *do*; a pinned tool is still gated exactly
    *  like any other. */
   pinnedTools: string[];
+  /** Switched on. Off keeps the program, its grants and its pins, and nothing about
+   *  it reaches the model or runs until it is switched back on. */
+  enabled: boolean;
 }
 
 export class ToolsError extends Error {
@@ -122,6 +125,8 @@ function toServer(raw: Record<string, unknown>): ToolServer {
     toolBudget: count(raw.toolBudget),
     builtin: raw.builtin === true,
     pinnedTools: strings(raw.pinnedTools),
+    // Absent means on: a backend from before the switch existed had no off.
+    enabled: raw.enabled !== false,
   };
 }
 
@@ -179,6 +184,18 @@ export async function pinTools(serverId: string, tools: string[]): Promise<strin
     }),
   );
   return strings(raw.pinnedTools);
+}
+
+/** Switch a server on or off without removing it. Off stops its process at once. */
+export async function setServerEnabled(serverId: string, enabled: boolean): Promise<ToolServer> {
+  const raw = await readOrThrow(
+    await fetch(`${API_BASE}/tools/servers/${encodeURIComponent(serverId)}/enabled`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }),
+  );
+  return toServer(raw);
 }
 
 export async function fetchServers(signal?: AbortSignal): Promise<ToolServer[]> {
@@ -269,4 +286,81 @@ export async function detachServer(serverId: string): Promise<void> {
   await readOrThrow(
     await fetch(`${API_BASE}/tools/servers/${encodeURIComponent(serverId)}`, { method: 'DELETE' }),
   );
+}
+
+/**
+ * Call a tool on an MCP server directly.
+ * Used by quick actions in the Ambient Panel and Settings.
+ */
+export async function callTool(
+  serverId: string,
+  tool: string,
+  arguments_: Record<string, unknown>
+): Promise<{ success: boolean; result?: unknown; error?: string; needsConfirmation?: boolean }> {
+  const res = await fetch(`${API_BASE}/tools/call`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server: serverId, tool, arguments: arguments_ }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { success: false, error: body.detail || `HTTP ${res.status}` };
+  }
+  return res.json();
+}
+
+export interface CuaDriverInstallStatus {
+  status: 'downloading' | 'installing' | 'complete' | 'error';
+  progress: number;
+  message: string;
+  error: string;
+}
+
+export interface CuaDriverStatus {
+  installed: boolean;
+  path: string;
+  version: string | null;
+  in_path: boolean;
+}
+
+/** Install cua-driver binary. */
+export interface CuaHealth {
+  status: 'healthy' | 'permissions_needed' | 'not_connected' | 'error' | 'unknown';
+  detail?: string;
+  error?: string;
+  platform?: string;
+  version?: string;
+}
+
+/** Ask the driver itself whether it can act on this machine (its `health_report`).
+ *  Connects it if it is not connected yet, so the first call can take a few seconds. */
+export async function fetchCuaHealth(serverId: string): Promise<CuaHealth> {
+  const res = await fetch(`${API_BASE}/tools/cua-driver/health?server=${encodeURIComponent(serverId)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { status: 'error', error: body.detail || `HTTP ${res.status}` };
+  }
+  return (await res.json()) as CuaHealth;
+}
+
+export async function installCuaDriver(version: string = 'latest'): Promise<CuaDriverInstallStatus> {
+  const res = await fetch(`${API_BASE}/tools/cua-driver/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { status: 'error', progress: 0, message: '', error: body.detail || `HTTP ${res.status}` };
+  }
+  return res.json();
+}
+
+/** Check cua-driver installation status. */
+export async function getCuaDriverStatus(): Promise<CuaDriverStatus> {
+  const res = await fetch(`${API_BASE}/tools/cua-driver/status`);
+  if (!res.ok) {
+    return { installed: false, path: '', version: null, in_path: false };
+  }
+  return res.json();
 }

@@ -95,7 +95,12 @@ _LOOKS_READ_ONLY = (
 #: Names that mean "this destroys". Matching one is enough to force a
 #: confirmation even where the server is otherwise granted, because the cost of
 #: being wrong is asymmetric and unrecoverable.
-_LOOKS_DESTRUCTIVE = ("delete", "remove", "drop", "destroy", "purge", "truncate", "rm")
+#: `kill` is the one addition: a tool that kills a process is destructive on any
+#: server. Words like `browser`, `frame` or `end` are not -- a destructive word
+#: cannot be satisfied by a grant, so `open_in_browser` carrying one asked again
+#: after every "allow", which is the dialog-a-day failure rule 7j names. Where a
+#: particular server needs more than the words, it is named by server below.
+_LOOKS_DESTRUCTIVE = ("delete", "remove", "drop", "destroy", "purge", "truncate", "rm", "kill")
 
 #: Names that mean "this sends something to someone". **A different hazard from
 #: destruction and the same shape**: once it has gone it cannot be called back,
@@ -118,6 +123,7 @@ _LOOKS_DESTRUCTIVE = ("delete", "remove", "drop", "destroy", "purge", "truncate"
 #: `decide` already treats as needing a confirmation.
 _LOOKS_OUTBOUND = (
     "send", "reply", "forward", "publish", "tweet", "broadcast", "submit",
+    "upload",
 )
 
 #: Words that are a send as a verb and a thing as a noun. `post_comment` sends;
@@ -172,10 +178,25 @@ def _matches(tool_name: str, words: tuple) -> bool:
         if word in present:
             return True
         if len(word) >= _PREFIX_MATCH_FROM and any(
-            token.startswith(word) for token in present
+            _inflects(token, word) for token in present
         ):
             return True
     return False
+
+
+#: The endings that make a token the same word. **Inflections, not any longer word**:
+#: the prefix test this replaced read `browser` as `browse` + "r", so every
+#: `browser_*` tool and `open_in_browser` were "reads only" again -- the 3 October
+#: defect this function's docstring records, back through the prefix rule added to fix
+#: its sibling. Found 10 October 2026 when cua-driver's `browser_navigate`, which sends
+#: the person's real browser to any URL, was allowed without asking on every server.
+_INFLECTIONS = ("s", "es", "d", "ed", "ing")
+
+
+def _inflects(token: str, word: str) -> bool:
+    """`deletes`, `deleted`, `fetching`, `removing` are `word`; `browser` is not `browse`."""
+    stems = [word] + ([word[:-1]] if word.endswith("e") else [])
+    return any(token == stem + ending for stem in stems for ending in _INFLECTIONS)
 
 
 def _annotation_says_destructive(annotations: Optional[Mapping[str, Any]]) -> bool:
@@ -238,6 +259,117 @@ def looks_outbound(tool_name: str) -> bool:
     )
 
 
+#: cua-driver's tools by exact name. Keyed to the server and never to the name
+#: alone: `decide` once answered "reads only" for any server's `get_config`, ahead
+#: of that server's own `destructiveHint`, which is a name widening a permission.
+_CUA_READ_ONLY = frozenset({
+    "get_browser_state", "get_window_state", "get_desktop_state",
+    "get_screen_size", "get_cursor_position", "get_accessibility_tree",
+    "get_config", "get_session", "list_sessions", "get_agent_cursor_state",
+    "get_recording_state", "check_permissions", "health_report",
+    "list_windows", "list_apps", "list_files", "zoom",
+})
+_CUA_MUTATIVE = frozenset({
+    "start_session", "end_session", "start_recording", "stop_recording",
+    "replay_trajectory", "install_extension", "set_config", "install_ffmpeg",
+    "set_agent_cursor_enabled", "set_agent_cursor_motion", "set_agent_cursor_theme",
+    "set_window_frame", "clipboard_write", "browser_download", "browser_set_input_files",
+    "kill_app", "invoke_menu", "bring_to_front", "launch_app", "drag",
+    "click", "double_click", "right_click", "type_text", "press_key",
+    "hotkey", "scroll", "set_value", "browser_click", "browser_type",
+    "browser_pointer", "browser_dialog", "run_actions",
+})
+#: Asked every time, whatever has been granted: they destroy, or move something
+#: off the machine or onto the clipboard.
+_CUA_ALWAYS_CONFIRM = frozenset({
+    "kill_app", "end_session", "stop_recording", "clipboard_write",
+    "browser_download", "browser_set_input_files",
+    # Sends the person's own browser, signed in as them, to a URL the model chose.
+    # A URL can carry anything in its query, so this is a send as well as a change.
+    "browser_navigate",
+})
+#: Refused outright, on any mode and any grant. Each one makes the driver reach the
+#: internet itself -- GitHub for an update check, a download for ffmpeg or an
+#: extension -- where Zaram's egress gate cannot see it and its log cannot record it
+#: (rule 3), or rewrites the driver's own settings, which is where its telemetry
+#: switch lives. Zaram installs and configures the driver; the model does not.
+_CUA_REFUSED = {
+    "check_for_update": "contacts GitHub on its own, outside Zaram's egress log",
+    "install_ffmpeg": "downloads a program on its own, outside Zaram's egress log",
+    "install_extension": "downloads an extension on its own, outside Zaram's egress log",
+    "set_config": "rewrites the driver's own settings, including its telemetry switch",
+}
+_CUA_MUTATIVE = _CUA_MUTATIVE | {"browser_navigate", "page", "move_cursor", "escalate_session"}
+_CUA_READ_ONLY = _CUA_READ_ONLY | {"verify_state", "parse_visual_regions", "debug_window_info", "get_session_state"}
+
+
+def _is_cua_server(server_id: str) -> bool:
+    return "cua" in (server_id or "").lower()
+
+
+def always_asks(server_id: str, tool_name: str) -> bool:
+    """Whether no grant can ever settle this tool -- so a card must not offer one.
+
+    cua-driver's always-confirm tools ask on every call by name, and the runtime's
+    `grantable` read only the generic word lists, so the card offered "always allow"
+    for `kill_app` and `browser_navigate` and the gate then ignored the answer.
+    """
+    if _is_self_server(server_id) and tool_name in _SELF_ALWAYS_ASK:
+        return True
+    return _is_cua_server(server_id) and tool_name in _CUA_ALWAYS_CONFIRM
+
+
+#: Zaram's own settings tools that ask every time. `grant_tool` because a model
+#: must never be able to widen its own permissions off one card allowed once;
+#: `set_web_search` because turning it on lets questions leave the computer, and
+#: that is the person's decision each time (rule 5). Kept in step with
+#: `zaram_self.ALWAYS_ASK` by test rather than imported, so this module keeps no
+#: dependency on a server.
+_SELF_ALWAYS_ASK = frozenset({"grant_tool", "set_web_search"})
+
+
+def _is_self_server(server_id: str) -> bool:
+    return (server_id or "") == "zaram-self"
+
+
+def _cua_decision(
+    tool_name: str,
+    mode: WriteMode,
+    granted: Set[str],
+    annotations: Optional[Mapping[str, Any]],
+) -> Optional[Decision]:
+    """The verdict for a cua-driver tool by exact name, or ``None`` to fall through.
+
+    One-directional like the rest of this module: the read-only set is skipped
+    when the server's own hint says the tool writes, so a name can only ever
+    loosen what the server has not contradicted.
+    """
+    if tool_name in _CUA_REFUSED:
+        return Decision(Verdict.REFUSE, f"{tool_name} {_CUA_REFUSED[tool_name]}, so Zaram does not run it.")
+    if tool_name in _CUA_READ_ONLY:
+        if _annotation_says_destructive(annotations):
+            return None
+        return Decision(Verdict.ALLOW, "reads only")
+    if tool_name in _CUA_MUTATIVE:
+        if mode is WriteMode.READ_ONLY:
+            return Decision(
+                Verdict.REFUSE,
+                f"{tool_name} changes something, and this server is read-only "
+                f"because nothing here can undo it. Mark the server as backed by "
+                f"an app with its own undo to permit it.",
+            )
+        if tool_name in _CUA_ALWAYS_CONFIRM:
+            return Decision(Verdict.CONFIRM, f"{tool_name} always asks; cannot be called back")
+        if mode is WriteMode.GRANTED or tool_name in granted:
+            return Decision(Verdict.ALLOW, "you granted this tool")
+        return Decision(
+            Verdict.CONFIRM,
+            f"{tool_name} changes something. Its app can undo it, and Zaram will "
+            f"stop asking about this tool once you allow it.",
+        )
+    return None
+
+
 def decide(
     *,
     tool_name: str,
@@ -245,6 +377,7 @@ def decide(
     granted_tools: Optional[Set[str]] = None,
     annotations: Optional[Mapping[str, Any]] = None,
     not_read_only: bool = False,
+    server_id: str = "",
 ) -> Decision:
     """Whether this call runs, asks, or is refused.
 
@@ -263,6 +396,17 @@ def decide(
     `McpRuntime._builtin_says_not_read_only` for the case that found it.
     """
     granted = granted_tools or set()
+
+    # cua-driver names its tools exactly and a stranger's server must not borrow
+    # them, so these apply to that server only.
+    if _is_cua_server(server_id):
+        settled = _cua_decision(tool_name, mode, granted, annotations)
+        if settled is not None:
+            return settled
+
+    if _is_self_server(server_id) and tool_name in _SELF_ALWAYS_ASK:
+        return Decision(Verdict.CONFIRM, f"{tool_name} always asks; a standing yes is never kept for it")
+
     destructive = looks_destructive(tool_name, annotations)
 
     # Reading is always permitted. It is the tier that needs no undo, no

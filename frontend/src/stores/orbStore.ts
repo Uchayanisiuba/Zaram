@@ -25,6 +25,7 @@ export const ORB_STATES = [
   'idle',
   'thinking',
   'coding',
+  'computer_use',
   'speaking',
   'listening',
   'swapping',

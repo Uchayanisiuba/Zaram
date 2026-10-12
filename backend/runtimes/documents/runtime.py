@@ -32,7 +32,15 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-from artifacts.contracts import Artifact, ArtifactKind, ArtifactSource, Claim
+from artifacts.contracts import (
+    Artifact,
+    ArtifactKind,
+    ArtifactSource,
+    Claim,
+    ImageBlock,
+    Origin,
+)
+from artifacts.letterhead import Letterhead
 from artifacts.service import ArtifactService
 from core.contracts import (
     Capability,
@@ -85,6 +93,14 @@ _STRUCTURED = {
     ArtifactKind.CV,
 }
 
+#: The field a picture goes in, for the kinds made of fields. Spreadsheets and
+#: charts are absent on purpose -- see `DocumentsRuntime.places_pictures`.
+_PICTURE_SLOT = {
+    ArtifactKind.INVOICE: "logo",
+    ArtifactKind.CV: "photo",
+    ArtifactKind.DECK: "slide",
+}
+
 #: Prefixes an engine or the dispatcher puts in front of a failure.
 #:
 #: These reach this runtime as "the answer" because in-band errors are text and
@@ -106,6 +122,107 @@ class DocumentsRuntime(Runtime):
         self._generated = 0
         #: Reads an already-written answer into fields. See `set_extractor`.
         self._ask: Optional[Any] = None
+        #: Reads the pictures attached to a conversation. See `set_pictures`.
+        self._pictures: Optional[Any] = None
+
+    def set_pictures(self, pictures_for_session: Any) -> None:
+        """Give this runtime a way to reach the pictures a conversation holds.
+
+        Injected for the reason `set_extractor` is: the artifacts layer must
+        not depend on the attachments layer. Absent is a supported state -- a
+        document is then made without placing any picture, as it always was.
+        """
+        self._pictures = pictures_for_session
+
+    def places_pictures(self, prompt: str) -> bool:
+        """Whether a document asked for in these words can carry a picture.
+
+        A document written as prose can, by a markdown image. An invoice or
+        quote takes a logo, a CV a photo and a deck a picture per slide, each
+        in a field of the extracted draft (`picture_slot`). A spreadsheet is
+        cells and a chart is drawn from data, so neither has anywhere a
+        picture belongs. Asked before the model writes, so it is never told
+        to place a picture the file cannot hold.
+        """
+        kind = _kind_from(prompt)
+        return kind not in (ArtifactKind.SPREADSHEET, ArtifactKind.CHART)
+
+    def picture_slot(self, prompt: str) -> str:
+        """Where a picture goes in the document these words ask for.
+
+        ``""`` for a document written as prose (a markdown image places it);
+        ``"logo"``, ``"photo"`` or ``"slide"`` for the three kinds made of
+        fields. Names the field `attachments.pictures.document_guidance` tells
+        the model about.
+        """
+        return _PICTURE_SLOT.get(_kind_from(prompt), "")
+
+    def _pictures_in(self, session_id: str) -> Dict[str, Any]:
+        """Attached pictures by lower-cased name; empty when none or unreadable."""
+        if self._pictures is None or not session_id:
+            return {}
+        try:
+            return {p.name.lower(): p for p in self._pictures(session_id)}
+        except Exception:  # noqa: BLE001 - a picture that cannot be read must not stop the document
+            logger.exception("Could not read the attached pictures")
+            return {}
+
+    async def _web_photos(self, body: str, prompt: str) -> Dict[str, Any]:
+        """The `photo:` images in ``body``, found on the web, by `photo_key`.
+
+        Empty when the answer names none -- the overwhelming case, and it costs
+        nothing: no search, no question. Otherwise the photo pack's
+        `find_photos` does the work it does for a page: the rule-8 check
+        against the Spine (a description that repeats something stored is
+        refused), one consent question per photo source naming every
+        description, pacing, and a cache. It blocks while the person answers,
+        so it runs on a worker thread.
+
+        Never raises. A photo that is not found is simply absent from the
+        result, and its paragraph falls back to its alt text.
+        """
+        from artifacts.markdown_blocks import PHOTO_REFERENCE, photo_key
+
+        descriptions: List[str] = []
+        for match in PHOTO_REFERENCE.finditer(body or ""):
+            description = match.group(1).strip()
+            if description and photo_key(description) not in {photo_key(d) for d in descriptions}:
+                descriptions.append(description)
+        if not descriptions:
+            return {}
+        try:
+            import asyncio
+
+            from packs.photos.api import default_spine_texts
+            from packs.photos.finder import find_photos, photos_dir
+
+            texts = await default_spine_texts()
+            results = await asyncio.to_thread(
+                find_photos, descriptions, spine_texts=texts, request_text=prompt
+            )
+            folder = photos_dir()
+        except Exception:  # noqa: BLE001 - photos must never stop the document
+            logger.exception("Could not look for the document's photos")
+            return {}
+
+        found: Dict[str, Any] = {}
+        for result in results:
+            if "error" in result or not result.get("name"):
+                logger.info("[Documents] photo not placed: %s", result.get("error", "no file"))
+                continue
+            try:
+                data = (folder / result["name"]).read_bytes()
+            except OSError:
+                continue
+            key = photo_key(result.get("description") or "")
+            found[key] = _WebPhoto(
+                name=key,
+                data=data,
+                media_type=result.get("mime") or "image/jpeg",
+                credit_line=_credit_line(result),
+                source_url=result.get("source_url") or "",
+            )
+        return found
 
     def set_extractor(self, ask: Any) -> None:
         """Give this runtime a way to read an answer into structured fields.
@@ -267,10 +384,34 @@ class DocumentsRuntime(Runtime):
                 input_data=input_data,
             )
 
+        # Pictures the person attached, placed where the answer wrote them by
+        # name. Each one placed is recorded as a source -- a user document, by
+        # the name they gave the file -- so the file says where its pictures
+        # came from.
+        placed: List[str] = []
+        held = self._pictures_in(str(input_data.get("session_id", "")))
+        # Photos from the web, where the answer named them (`photo:`) because
+        # the person asked for them. Found here, through the photo pack, with
+        # the same one-question consent a page uses; credited in the file and
+        # recorded as web sources.
+        web = await self._web_photos(body, prompt)
+        if web:
+            body = body.rstrip() + "\n\n" + _photo_credits(web.values())
+        blocks = _blocks(body, claims, title, pictures={**held, **web}, placed=placed)
+        sources = list(sources) + [
+            ArtifactSource(kind="web", url=web[name].source_url or None, title=web[name].credit_line)
+            if name in web
+            else ArtifactSource(
+                kind=Origin.USER_DOCUMENT.value,
+                title=f"{held[name.lower()].original} (picture you attached)",
+            )
+            for name in placed
+        ]
+
         try:
             artifact = self._service.create_document(
                 title=title,
-                blocks=_blocks(body, claims, title),
+                blocks=blocks,
                 kind=kind,
                 fmt=input_data.get("format"),
                 project_id=input_data.get("project_id", ""),
@@ -341,12 +482,57 @@ class DocumentsRuntime(Runtime):
             claims=claims,
         )
 
+        # The pictures this conversation holds, offered to the extractor by name
+        # and only for the kinds that have a field for one. The bytes stay here.
+        held = (
+            self._pictures_in(str(input_data.get("session_id", "")))
+            if kind in _PICTURE_SLOT
+            else {}
+        )
+        offered = [p.name for p in held.values()]
+        #: What could not be done about a picture, said to the person.
+        notes: List[str] = []
+
+        def place(name: str, alt: str, uri: bool = False) -> Any:
+            """The picture ``name`` as an `ImageBlock` (or a `data:` URI), or None.
+
+            Every picture placed is recorded as a source -- a user document, by
+            the name they gave the file -- exactly as the markdown path does.
+            """
+            picture = held.get((name or "").lower())
+            if picture is None:
+                if name:
+                    notes.append(
+                        f'"{name}" is not a picture attached to this conversation, '
+                        "so it was left out."
+                    )
+                return None
+            title = f"{picture.original} (picture you attached)"
+            if not any(s.title == title for s in common["sources"]):
+                common["sources"] = list(common["sources"]) + [
+                    ArtifactSource(kind=Origin.USER_DOCUMENT.value, title=title)
+                ]
+            block = ImageBlock(data=picture.data, alt=alt, media_type=picture.media_type)
+            if not uri:
+                return block
+            import base64
+
+            return f"data:{block.media_type};base64,{base64.b64encode(block.data).decode('ascii')}"
+
         try:
             if kind is ArtifactKind.INVOICE:
-                draft = extract.invoice_from(body, prompt, self._ask)
+                draft = extract.invoice_from(body, prompt, self._ask, pictures=offered)
                 if isinstance(draft, extract.Missing):
                     return {"success": False, "error": draft.sentence(what)}
+                notes.extend(draft.left_out)
+                logo = place(draft.logo, "Logo", uri=True) if draft.logo else None
+                # The logo rides the letterhead, which is how an invoice has
+                # always carried one (`render_invoice`'s masthead). Only the
+                # logo is set: the name and address a person stored belong to
+                # `POST /artifacts/generate`, which this path has never used.
+                letterhead = Letterhead(logo=logo) if logo else None
                 artifact = self._service.create_invoice(
+                    letterhead=letterhead,
                     items=[
                         invoice_module.line_item(
                             description=item["description"],
@@ -370,9 +556,13 @@ class DocumentsRuntime(Runtime):
                     header=draft.header, rows=draft.rows, **common
                 )
             elif kind is ArtifactKind.CV:
-                draft = extract.cv_from(body, prompt, self._ask)
+                draft = extract.cv_from(body, prompt, self._ask, pictures=offered)
                 if isinstance(draft, extract.Missing):
                     return {"success": False, "error": draft.sentence(what)}
+                notes.extend(draft.left_out)
+                photo = (
+                    place(draft.photo, f"Photo of {draft.name}") if draft.photo else None
+                )
                 # The person's name titles the file, not the request. `common`
                 # carries the request's title, so it is replaced rather than
                 # passed alongside — two titles would be a filename argument
@@ -386,13 +576,22 @@ class DocumentsRuntime(Runtime):
                     experience=draft.experience,
                     education=draft.education,
                     skills=draft.skills,
+                    photo=photo,
                     **cv_common,
                 )
             else:
-                draft = extract.deck_from(body, prompt, self._ask)
+                draft = extract.deck_from(body, prompt, self._ask, pictures=offered)
                 if isinstance(draft, extract.Missing):
                     return {"success": False, "error": draft.sentence(what)}
-                artifact = self._service.create_deck(slides=draft.slides, **common)
+                notes.extend(draft.left_out)
+                slide_images = {}
+                for index, name in draft.images.items():
+                    block = place(name, f"Picture for “{draft.slides[index][0]}”")
+                    if block is not None:
+                        slide_images[index] = block
+                artifact = self._service.create_deck(
+                    slides=draft.slides, slide_images=slide_images, **common
+                )
         except invoice_module.InvoiceIncomplete as exc:
             # The same refusal `POST /artifacts/generate` returns as a 400. It
             # is not a crash: it is the document layer declining to produce a
@@ -404,7 +603,12 @@ class DocumentsRuntime(Runtime):
 
         self._generated += 1
         logger.info("Generated %s (%d bytes)", artifact.filename, artifact.size_bytes)
-        return {"success": True, "artifact": _card(artifact)}
+        result: Dict[str, Any] = {"success": True, "artifact": _card(artifact)}
+        # A picture that could not be placed is said, not dropped: the file is
+        # made without it and the person is told which one and why.
+        if notes:
+            result["notes"] = notes
+        return result
 
 
 # ------------------------------------------------------------------ helpers
@@ -540,6 +744,9 @@ def _title_from(prompt: str, body: str) -> str:
     """
     for line in body.splitlines():
         stripped = _plain(line)
+        # A picture placed first is not the document's name.
+        if stripped.startswith("!["):
+            continue
         if len(stripped) > 3:
             return stripped[:80]
 
@@ -547,7 +754,47 @@ def _title_from(prompt: str, body: str) -> str:
     return (cleaned[:80] or "Untitled document").capitalize()
 
 
-def _blocks(body: str, claims: List[Claim], title: str = "") -> List[object]:
+class _WebPhoto:
+    """A photo found on the web, in the shape `ImageBlock` is built from."""
+
+    __slots__ = ("name", "data", "media_type", "credit_line", "source_url")
+
+    def __init__(self, *, name: str, data: bytes, media_type: str, credit_line: str, source_url: str) -> None:
+        self.name = name
+        self.data = data
+        self.media_type = media_type
+        self.credit_line = credit_line
+        self.source_url = source_url
+
+
+def _credit_line(result: Dict[str, Any]) -> str:
+    """One photo's credit, as its licence asks for: title, author, licence, source."""
+    title = (result.get("title") or "Photo").strip()
+    by = (result.get("creator") or "").strip()
+    licence = (result.get("license_label") or result.get("license") or "").strip()
+    source = (result.get("source") or "").strip()
+    parts = [f"\u201c{title}\u201d" + (f" by {by}" if by else "")]
+    if licence:
+        parts.append(licence)
+    if source:
+        parts.append(f"via {source}")
+    return ", ".join(parts)
+
+
+def _photo_credits(photos: Any) -> str:
+    """The credits section a document with web photos ends with."""
+    lines = ["## Photo credits", ""]
+    lines += [f"- {p.credit_line}" for p in photos]
+    return "\n".join(lines)
+
+
+def _blocks(
+    body: str,
+    claims: List[Claim],
+    title: str = "",
+    pictures: Optional[Dict[str, Any]] = None,
+    placed: Optional[List[str]] = None,
+) -> List[object]:
     """The answer as document blocks, with claims anchored where they appear.
 
     **Markdown is kept, not stripped — 14 September 2026.** The brief now
@@ -567,7 +814,7 @@ def _blocks(body: str, claims: List[Claim], title: str = "") -> List[object]:
 
         by_excerpt = {c.excerpt.strip(): c for c in claims if c.excerpt.strip()}
         out: List[object] = []
-        for block in blocks_from_markdown(body, title=title):
+        for block in blocks_from_markdown(body, title=title, pictures=pictures, placed=placed):
             if isinstance(block, RichText) and by_excerpt:
                 bare = _bare_text(block.html)
                 if bare in by_excerpt:
@@ -582,7 +829,9 @@ def _blocks(body: str, claims: List[Claim], title: str = "") -> List[object]:
 #: Markdown the brief asks for and a model writes: a heading, a list item, a
 #: table row, or emphasis. A body with none of these is plain prose and is
 #: split on blank lines as it always was.
-_MARKUP = re.compile(r"^\s{0,3}(#{1,6}\s|[-*+]\s|\d+[.)]\s|\|)|\*\*|`", re.MULTILINE)
+_MARKUP = re.compile(
+    r"^\s{0,3}(#{1,6}\s|[-*+]\s|\d+[.)]\s|\||!\[[^\]]*\]\()|\*\*|`", re.MULTILINE
+)
 
 
 def _has_markup(body: str) -> bool:

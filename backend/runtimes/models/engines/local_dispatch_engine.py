@@ -192,23 +192,32 @@ class LocalDispatchEngine(LLMEngine):
                 return bool(warm(chosen))
             return bool(warm(chosen, timeout=timeout))
 
-        # **A second local server gets no preload, and that is deliberate.**
-        # Ollama documents an empty prompt with `keep_alive` as the way to load
-        # weights without generating. No OpenAI-compatible server has an
-        # equivalent: the nearest thing is a real one-token completion, which
-        # is a *generation* — it runs the model, it appears in that server's
-        # logs as a request the user never made, and on a server configured
-        # with a template that rejects an empty message it fails outright.
+        # **A second local server is asked to load, and the route is asked
+        # rather than assumed.** This used to refuse outright, on the grounds
+        # that no OpenAI-compatible server can load without generating: the
+        # nearest thing in that contract is a real one-token completion, which
+        # runs the model, shows in that server's logs as a request nobody made,
+        # and fails on a template that rejects an empty message. All true, and
+        # still not the whole picture -- TabbyAPI has `POST /v1/model/load`,
+        # which moves the weights onto the card and generates nothing.
         #
-        # Spending a hidden inference to remove a wait is a trade the user has
-        # not been offered, so the honest answer is that this cannot be warmed.
-        # `False` already means exactly that to the caller, and the cold start
-        # is still announced by `model_load` when the message arrives.
-        logger.info(
-            "[LocalDispatch] no preload for %s: %s has no load-without-generate "
-            "route", chosen, endpoint,
-        )
-        return False
+        # With `inline_model_loading` and an empty `model_name`, which is the
+        # maintainer's configuration, that left the first message of every
+        # session paying a full cold start while Ollama's model was preloaded
+        # at launch. `OpenAICompatibleEngine.load` asks the server and answers
+        # ``False`` for one without the route, so LM Studio and the rest are
+        # exactly where they were: nothing generated on anyone's behalf.
+        wire = chosen
+        try:
+            wire = self._wire_name(chosen)
+        except Exception:  # noqa: BLE001
+            logger.debug("wire_name failed for %r; sending id unchanged", chosen)
+        load = getattr(self._engine_for(endpoint, wire), "load", None)
+        if not callable(load):
+            return False
+        if timeout is None:
+            return bool(load(wire))
+        return bool(load(wire, timeout=timeout))
 
     def stream_response(
         self,

@@ -2,6 +2,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { memo, type ReactNode } from 'react';
+import { isWebAddress, onOpenApp } from '@/lib/openInBrowser';
 
 /**
  * A reply, rendered as the markdown it already is.
@@ -98,23 +99,16 @@ function MessageBodyImpl({ text, streaming = false }: { text: string; streaming?
         rehypePlugins={streaming ? REHYPE_NONE : (REHYPE_HIGHLIGHT as unknown as never[])}
         components={{
           /**
-           * A link is text here, not a control.
-           *
-           * `electron/main.js` hardens the window: `setWindowOpenHandler`
-           * denies every `window.open` and `will-navigate` cancels anything
-           * leaving the app. An anchor would therefore look like a link,
-           * invite a click, and do nothing at all — which the UI principles
-           * forbid in as many words: disabled capabilities are visible, not
-           * silent.
-           *
-           * So the destination is shown instead of hidden behind it. On a
-           * product whose replies quote documents written by strangers, being
-           * able to *read* where a link points without following it is the
-           * better behaviour anyway, not a consolation for the missing one.
+           * Local app links use the isolated browser pane, not renderer
+           * navigation. The destination remains visible before it is opened.
            */
           a: ({ href, children }) => (
             <span>
-              {children}
+              {isWebAddress(href) ? (
+                <a href={href} onClick={onOpenApp(href)} rel="noopener noreferrer">
+                  {children}
+                </a>
+              ) : children}
               {href && (
                 <span
                   style={{ color: 'var(--color-text-muted)', wordBreak: 'break-all' }}

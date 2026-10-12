@@ -23,6 +23,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { streamChat, ChatTransportError } from '@/services/chatClient';
 import { useSystemStore, describeSystem } from '@/stores/systemStore';
+import { fetchServers, callTool, type ToolServer } from '@/services/toolsClient';
+import { Monitor, MousePointerClick, Keyboard, List, Maximize, Move, RotateCcw, ChevronDown, ChevronUp, X } from 'lucide-react';
 
 export default function AmbientPanel() {
   const [text, setText] = useState('');
@@ -51,15 +53,55 @@ export default function AmbientPanel() {
 
   const backendOnline = useSystemStore((s) => s.backendOnline);
   const routing = useSystemStore((s) => s.routing);
-  const refresh = useSystemStore((s) => s.refresh);
   const cloudAnsweredAt = useSystemStore((s) => s.cloudAnsweredAt);
 
-  // Asked once when the panel is created, which happens at boot. The window is
-  // kept warm and hidden, so this is not on the summon path — polling here
-  // would be a timer running all day to keep one line of text fresh.
+  // Computer Use quick actions state
+  const [cuaServers, setCuaServers] = useState<ToolServer[]>([]);
+  const [cuaActionResult, setCuaActionResult] = useState<{ tool: string; result?: any; error?: string } | null>(null);
+  const [cuaActionBusy, setCuaActionBusy] = useState(false);
+  const [showCuaActions, setShowCuaActions] = useState(false);
+
+  // Load cua-driver servers on mount
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (backendOnline) {
+      void loadCuaServers();
+    }
+  }, [backendOnline]);
+
+  const loadCuaServers = useCallback(async () => {
+    try {
+      const servers = await fetchServers();
+      const cua = servers.filter((s) => s.id.toLowerCase().includes('cua-driver') || s.id.toLowerCase().includes('cua'));
+      setCuaServers(cua);
+    } catch {
+      // Silently fail - computer use is optional
+    }
+  }, []);
+
+  const runCuaAction = useCallback(async (serverId: string, tool: string, args: Record<string, any>) => {
+    if (cuaActionBusy) return;
+    setCuaActionBusy(true);
+    setCuaActionResult(null);
+    try {
+      const result = await callTool(serverId, tool, args);
+      setCuaActionResult({ tool, result: result.result, error: result.error });
+    } catch (err) {
+      setCuaActionResult({ tool, error: (err as Error).message });
+    } finally {
+      setCuaActionBusy(false);
+    }
+  }, [cuaActionBusy]);
+
+  const runQuickAction = useCallback(async (serverId: string, action: 'screenshot' | 'list_windows' | 'list_apps' | 'get_desktop_state') => {
+    const config: Record<string, { tool: string; args: Record<string, any> }> = {
+      screenshot: { tool: 'get_desktop_state', args: {} },
+      list_windows: { tool: 'list_windows', args: {} },
+      list_apps: { tool: 'list_apps', args: {} },
+      get_desktop_state: { tool: 'get_desktop_state', args: {} },
+    };
+    const { tool, args } = config[action];
+    await runCuaAction(serverId, tool, args);
+  }, [runCuaAction]);
 
   // The window is shown rather than created, so focus has to be taken
   // explicitly each time. Without this the panel appears and the first
@@ -162,6 +204,210 @@ export default function AmbientPanel() {
               {reply}
               {asking && <span className="ambient__caret" aria-hidden="true" />}
             </p>
+          )}
+        </div>
+      )}
+
+      {/* Computer Use Quick Actions */}
+      {cuaServers.length > 0 && (
+        <div className="ambient__cua-actions" style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--color-border-subtle)' }}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
+              Computer Use ({cuaServers[0].id})
+            </span>
+            <button
+              type="button"
+              className="text-xs p-1 rounded"
+              style={{ color: 'var(--color-text-muted)', background: 'none', border: 0 }}
+              onClick={() => setShowCuaActions(!showCuaActions)}
+              aria-expanded={showCuaActions}
+            >
+              {showCuaActions ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+          </div>
+
+          {showCuaActions && (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg"
+                  style={{
+                    background: 'var(--color-glass)',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                    opacity: cuaActionBusy ? 0.5 : 1,
+                  }}
+                  onClick={() => runQuickAction(cuaServers[0].id, 'screenshot')}
+                  disabled={cuaActionBusy}
+                  title="Capture full desktop screenshot"
+                >
+                  <Monitor size={12} />
+                  <span>Screenshot</span>
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg"
+                  style={{
+                    background: 'var(--color-glass)',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                    opacity: cuaActionBusy ? 0.5 : 1,
+                  }}
+                  onClick={() => runQuickAction(cuaServers[0].id, 'list_windows')}
+                  disabled={cuaActionBusy}
+                  title="List all open windows"
+                >
+                  <List size={12} />
+                  <span>List Windows</span>
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg"
+                  style={{
+                    background: 'var(--color-glass)',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                    opacity: cuaActionBusy ? 0.5 : 1,
+                  }}
+                  onClick={() => runQuickAction(cuaServers[0].id, 'list_apps')}
+                  disabled={cuaActionBusy}
+                  title="List running applications"
+                >
+                  <RotateCcw size={12} />
+                  <span>List Apps</span>
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg"
+                  style={{
+                    background: 'var(--color-glass)',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                    opacity: cuaActionBusy ? 0.5 : 1,
+                  }}
+                  onClick={() => runQuickAction(cuaServers[0].id, 'get_desktop_state')}
+                  disabled={cuaActionBusy}
+                  title="Full desktop state with cursor position"
+                >
+                  <Maximize size={12} />
+                  <span>Desktop State</span>
+                </button>
+              </div>
+
+              {/* Advanced actions - need target */}
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg"
+                  style={{
+                    background: 'var(--color-glass)',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                    opacity: cuaActionBusy ? 0.5 : 1,
+                  }}
+                  onClick={() => runCuaAction(cuaServers[0].id, 'get_window_state', { pid: 0, include_screenshot: true })}
+                  disabled={cuaActionBusy}
+                  title="Inspect a window (needs PID)"
+                >
+                  <Maximize size={12} />
+                  <span>Window State</span>
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg"
+                  style={{
+                    background: 'var(--color-glass)',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                    opacity: cuaActionBusy ? 0.5 : 1,
+                  }}
+                  onClick={() => runCuaAction(cuaServers[0].id, 'click', { pid: 0, x: 100, y: 100 })}
+                  disabled={cuaActionBusy}
+                  title="Click at coordinates (needs PID, x, y)"
+                >
+                  <MousePointerClick size={12} />
+                  <span>Click</span>
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg"
+                  style={{
+                    background: 'var(--color-glass)',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                    opacity: cuaActionBusy ? 0.5 : 1,
+                  }}
+                  onClick={() => runCuaAction(cuaServers[0].id, 'type_text', { pid: 0, text: '' })}
+                  disabled={cuaActionBusy}
+                  title="Type text (needs PID, text)"
+                >
+                  <Keyboard size={12} />
+                  <span>Type Text</span>
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg"
+                  style={{
+                    background: 'var(--color-glass)',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                    opacity: cuaActionBusy ? 0.5 : 1,
+                  }}
+                  onClick={() => runCuaAction(cuaServers[0].id, 'scroll', { pid: 0, direction: 'down', pages: 1 })}
+                  disabled={cuaActionBusy}
+                  title="Scroll window (needs PID)"
+                >
+                  <Move size={12} />
+                  <span>Scroll</span>
+                </button>
+              </div>
+
+              {/* Action Result */}
+              {cuaActionResult && (
+                <div
+                  className="mt-2 p-2 rounded-lg text-xs font-mono overflow-auto max-h-48"
+                  style={{
+                    background: cuaActionResult.error ? 'rgba(248,113,113,0.1)' : 'rgba(16,185,129,0.1)',
+                    border: cuaActionResult.error
+                      ? '1px solid rgba(248,113,113,0.4)'
+                      : '1px solid rgba(16,185,129,0.4)',
+                    color: cuaActionResult.error ? '#fca5a5' : 'var(--color-emerald)',
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span>
+                      {cuaActionResult.error ? <span style={{ color: '#fca5a5' }}>✕</span> : <span style={{ color: 'var(--color-emerald)' }}>✓</span>}
+                      {cuaActionResult.tool}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-xs p-1"
+                      style={{ color: 'var(--color-text-muted)', background: 'none', border: 0 }}
+                      onClick={() => setCuaActionResult(null)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                  <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {cuaActionResult.error
+                      ? cuaActionResult.error
+                      : JSON.stringify(cuaActionResult.result, null, 2).slice(0, 2000)}
+                  </pre>
+                  {cuaActionResult.result &&
+                    typeof cuaActionResult.result === 'object' &&
+                    'screenshot' in cuaActionResult.result && (
+                    <div className="mt-2">
+                      <img
+                        src={`data:image/png;base64,${cuaActionResult.result.screenshot}`}
+                        alt="Screenshot"
+                        style={{ maxWidth: '100%', maxHeight: 200, borderRadius: '4px', border: '1px solid var(--color-border-subtle)' }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

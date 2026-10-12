@@ -22,8 +22,10 @@
  * click goes through here.
  */
 import type { MouseEvent } from 'react';
+import { useBrowserStore } from '@/stores/browserStore';
 
 export function openInBrowser(url: string): void {
+  if (!isWebAddress(url)) return;
   const shell = window.zaram?.shell?.openExternal;
   if (typeof shell === 'function') {
     void shell(url);
@@ -34,7 +36,37 @@ export function openInBrowser(url: string): void {
 
 /** Only http(s) goes out; anything else stays inert rather than opening. */
 export function isWebAddress(url: string | undefined): url is string {
-  return typeof url === 'string' && /^https?:\/\//i.test(url);
+  if (typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    return ['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
+/** Only literal loopback hosts are local; DNS resolution cannot grant trust. */
+export function isLocalAppAddress(url: string): boolean {
+  if (!isWebAddress(url)) return false;
+  const host = new URL(url).hostname.toLowerCase();
+  return host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+export function openAppAddress(url: string): void {
+  if (!isWebAddress(url)) return;
+  if (window.zaram?.browser && isLocalAppAddress(url)) {
+    useBrowserStore.getState().show(url);
+    return;
+  }
+  openInBrowser(url);
+}
+
+export function onOpenApp(url: string | undefined) {
+  return (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    if (isWebAddress(url)) openAppAddress(url);
+  };
 }
 
 export function onOpen(url: string | undefined) {

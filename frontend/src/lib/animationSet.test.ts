@@ -103,7 +103,7 @@ describe('clipsByState / statesWithoutClips', () => {
 
   it('names the states with no clip at all', () => {
     expect(statesWithoutClips(manifest, ALL).sort())
-      .toEqual(['coding', 'listening', 'speaking', 'swapping'])
+      .toEqual(['coding', 'computer_use', 'listening', 'speaking', 'swapping'])
   })
 })
 
@@ -155,6 +155,8 @@ describe('the shipped animation manifest', () => {
     // to do so since the retarget landed. `coding_a.glb` is built from
     // `Typing_01.fbx`, a re-export from `Robot_All_01` — the character
     // standing and typing, joints only, on its own rig.
-    expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['swapping'])
+    // `computer_use` joined it on 9 October 2026: a working state that falls back to
+    // the thinking set, as `coding` did before its clip existed.
+    expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['computer_use', 'swapping'])
   })
 })

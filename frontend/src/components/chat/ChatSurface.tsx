@@ -12,7 +12,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
-import { ArrowDown, Download, Eye, FileText, ImageIcon, Paperclip, Send, Square } from 'lucide-react';
+import { ArrowDown, Download, Eye, FileText, ImageIcon, Paperclip, RefreshCw, Send, Square } from 'lucide-react';
+import PhotoLine from '@/components/chat/PhotoLine';
 import ArtifactCard from '@/components/ArtifactCard';
 import ArtifactGrid from '@/components/ArtifactGrid';
 import ImageProgressCard from '@/components/ImageProgressCard';
@@ -65,14 +66,20 @@ import CodePreviewPanel from './CodePreviewPanel';
 import PageCheckLine from './PageCheckLine';
 import { usePageCheckOnReply } from '@/hooks/usePageCheckOnReply';
 import { usePageCheckStore } from '@/stores/pageCheckStore';
+import { useStarterStore } from '@/stores/starterStore';
 import BrowserPanel from '@/components/browser/BrowserPanel';
 import { useBrowserStore } from '@/stores/browserStore';
 import {
-  extractPreviewable,
   filenameFor,
   savePreviewable,
   type PreviewableBlock,
 } from '@/lib/previewableCode';
+import { asFiles, asReply } from '@/lib/pageEdits';
+import { pageForTurn, startersNamedIn } from '@/lib/replyPage';
+import { idsNamedIn, pictureMapFor } from '@/lib/pagePictures';
+import { usePictureStore } from '@/stores/pictureStore';
+import { blockPhotoDescriptions, canLookAgain, withPhotos } from '@/lib/pagePhotos';
+import { usePhotoStore } from '@/stores/photoStore';
 import {
   useLayoutStore,
   CHAT_MIN,
@@ -83,7 +90,7 @@ import { useChatModeStore } from '@/stores/chatModeStore';
 import { useMicStore } from '@/stores/micStore';
 import { PackOffer } from '@/components/settings/PacksSection';
 import { useSpeechStore } from '@/stores/speechStore';
-import { codingActivity } from '@/lib/orbActivity';
+import { composeActivity } from '@/lib/orbActivity';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useViewport } from '@/hooks/useViewport';
@@ -131,6 +138,17 @@ const NEAR_BOTTOM_PX = 48;
 
 export default function ChatSurface({ navigate }: Props) {
   const reduced = useIsReducedMotion();
+
+  // "Open Settings", said to Zaram: its settings tool asks for a place and the
+  // store holds the request until this view, which owns navigation, goes
+  // there. `App`'s `navigate` rather than a store's, for the reason on `Props`.
+  const requestedPlace = useChatStore((s) => s.requestedPlace);
+  const clearRequestedPlace = useChatStore((s) => s.clearRequestedPlace);
+  useEffect(() => {
+    if (!requestedPlace) return;
+    clearRequestedPlace();
+    navigate(requestedPlace);
+  }, [requestedPlace, clearRequestedPlace, navigate]);
 
   // Markup from a reply, brought forward over the orb. Held here rather than
   // per-message so only one preview is open at a time — two of these would
@@ -328,6 +346,8 @@ export default function ChatSurface({ navigate }: Props) {
   // `chatStore` holds the conversation and these are not part of it until
   // they are sent (rule 7d, one layer up).
   const sessionId = useChatStore((s) => s.sessionId);
+  // Where a picture a page uses is looked for when the session no longer holds it.
+  const conversationId = useChatStore((s) => s.conversationId);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   // **Revise**: the reply the next message corrects, or null. Set by the
   // Revise action under a reply, shown as a chip above the composer, cleared
@@ -347,6 +367,13 @@ export default function ChatSurface({ navigate }: Props) {
   // question about the same document, not a reason to upload it again. So
   // their ids keep travelling with every later question, underneath.
   const sentAttachments = useRef<ChatAttachment[]>([]);
+  // A new session is a different working context -- a conversation reopened
+  // from History, or a fresh one -- and the ids sent in the last one belong to
+  // it. Sent here they would name files this session never held. The reopened
+  // conversation's own pictures come back from the backend, which kept them.
+  useEffect(() => {
+    sentAttachments.current = [];
+  }, [sessionId]);
   const [refused, setRefused] = useState<RefusedAttachment[]>([]);
   // How many reference pictures the generator that would answer *now* accepts.
   // Zero — the honest default before anything is known — hides the offer
@@ -621,7 +648,7 @@ export default function ChatSurface({ navigate }: Props) {
     // reply's own text and the calls that ran; not the reasoning, and not the
     // tools merely offered. `plan` is the model writing its checklist, which
     // is thinking. See `codingActivity`.
-    const activity = codingActivity(
+    const activity = composeActivity(
       isStreaming,
       streamingText,
       streamingToolCalls.filter((c) => c.tool !== 'plan').map((c) => c.server),
@@ -635,6 +662,47 @@ export default function ChatSurface({ navigate }: Props) {
   // is for. See `usePageCheckOnReply` and `pageCheckStore`.
   const checkPage = usePageCheckStore((s) => s.check);
   usePageCheckOnReply(messages, isStreaming, checkPage);
+
+  // Tested starting points a reply in this conversation built on, fetched so
+  // its page can be shown. See `starterStore`.
+  const starterCodes = useStarterStore((s) => s.codes);
+  const ensureStarters = useStarterStore((s) => s.ensure);
+  useEffect(() => {
+    const named = startersNamedIn(messages);
+    if (named.length) void ensureStarters(named);
+  }, [messages, ensureStarters]);
+
+  // The pictures the person attached, fetched only once a reply names one, so
+  // a page can be shown with them in. See `pictureStore` and `pagePictures`.
+  const heldPictures = usePictureStore((s) => s.held);
+  const ensurePictures = usePictureStore((s) => s.ensure);
+  useEffect(() => {
+    const wanted = new Set<string>();
+    messages.forEach((m, i) => {
+      if (m.role === 'assistant') idsNamedIn(messages, i, m.text).forEach((id) => wanted.add(id));
+    });
+    if (wanted.size) void ensurePictures(sessionId, [...wanted], conversationId);
+  }, [messages, sessionId, conversationId, ensurePictures]);
+
+  // Photographs a page describes (`photo:...`), looked up when its reply has
+  // just finished in this session -- the trigger the page check uses, and for
+  // the same reason. Opening an old conversation must not start a search: it
+  // did, live, and asked the person about photos for a page they were not
+  // looking at. An older page's photographs are looked up when it is
+  // previewed. The first search asks the person. See `photoStore`.
+  const foundPhotos = usePhotoStore((s) => s.found);
+  const ensurePhotos = usePhotoStore((s) => s.ensure);
+  const findPhotosFor = useCallback(
+    (reply: string, question: string) => {
+      if (!reply.includes('photo:')) return;
+      const index = messages.length - 1;
+      const block = messages[index]?.text === reply ? pageForTurn(messages, index, starterCodes) : null;
+      const descriptions = block ? blockPhotoDescriptions(block) : [];
+      if (descriptions.length) void ensurePhotos(descriptions, question);
+    },
+    [messages, starterCodes, ensurePhotos],
+  );
+  usePageCheckOnReply(messages, isStreaming, findPhotosFor);
 
   // What the backend already holds for this conversation.
   //
@@ -807,7 +875,12 @@ export default function ChatSurface({ navigate }: Props) {
     // maintainer, 13 September). The scope survives the move: the ids of
     // everything sent this session still go with every later question.
     const ids = [...sentAttachments.current, ...attachments].map((a) => a.id);
-    const attached = attachments.map((a) => ({ id: a.id, name: a.name, kind: a.kind }));
+    const attached = attachments.map((a) => ({
+      id: a.id,
+      name: a.name,
+      kind: a.kind,
+      ...(a.page_name ? { pageName: a.page_name } : {}),
+    }));
     sentAttachments.current = [...sentAttachments.current, ...attachments];
     setAttachments([]);
     // Refusals go too, because they explain a drop that has now been read.
@@ -1329,8 +1402,23 @@ export default function ChatSurface({ navigate }: Props) {
                       moment of doubt, which is the moment markup arrives. */}
                   {msg.role === 'assistant' &&
                     (() => {
-                      const block = extractPreviewable(msg.text);
-                      if (!block) return null;
+                      // The page this reply stands for: written out, or its
+                      // changes applied to the page before it or to a tested
+                      // starting point. `lib/replyPage.ts`.
+                      const page = pageForTurn(
+                        messages,
+                        msgIndex,
+                        starterCodes,
+                        pictureMapFor(messages, msgIndex, heldPictures),
+                      );
+                      if (!page) return null;
+                      const block = withPhotos(page, foundPhotos);
+                      const askedFor =
+                        messages.slice(0, msgIndex).reverse().find((t) => t.role === 'user')?.text ?? '';
+                      const asItStands =
+                        'edited' in block && (block.edited || block.repaired)
+                          ? asReply(block.files ?? asFiles(block.code))
+                          : stripMarkers(msg.text);
                       const control =
                         'flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs hover:bg-white/5';
                       const controlStyle = {
@@ -1345,8 +1433,12 @@ export default function ChatSurface({ navigate }: Props) {
                                 .slice(0, msgIndex)
                                 .reverse()
                                 .find((m) => m.role === 'user');
-                              setPreviewFrom({ question: asked?.text ?? '', reply: stripMarkers(msg.text) });
+                              setPreviewFrom({ question: asked?.text ?? '', reply: asItStands });
                               setCodePreview(block);
+                              // An older page's photographs are looked up when
+                              // it is looked at; the panel fills them in.
+                              const described = blockPhotoDescriptions(block);
+                              if (described.length) void ensurePhotos(described, askedFor);
                             }}
                             className={control}
                             style={controlStyle}
@@ -1376,7 +1468,21 @@ export default function ChatSurface({ navigate }: Props) {
                             <Download size={12} />
                             Save {block.label}
                           </button>
+                          {/* Offered only when looking again could change the
+                              answer: the person said no, did not answer, or
+                              the connection or rate limit stopped it. */}
+                          {canLookAgain(block) && (
+                            <button
+                              onClick={() => void usePhotoStore.getState().lookAgain(blockPhotoDescriptions(block), askedFor)}
+                              className={control}
+                              style={controlStyle}
+                            >
+                              <RefreshCw size={12} />
+                              Find photos again
+                            </button>
+                          )}
                           <PageCheckLine reply={msg.text} />
+                          <PhotoLine block={block} />
                           {appSaveNote?.at === msgIndex && (
                             <span role="status" className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                               {appSaveNote.text}
@@ -1698,6 +1804,7 @@ export default function ChatSurface({ navigate }: Props) {
           <input
             ref={inputRef}
             type="text"
+            spellCheck={true}
             value={inputText}
             onChange={(e) => {
               // Barge-in by typing. Talking over someone to stop them is how
@@ -1843,7 +1950,7 @@ export default function ChatSurface({ navigate }: Props) {
             itself when no domains exist, so this is one control until the user
             has made a reason for the second. */}
         {!engineDown && (
-        <div className="mt-2 px-1 flex items-center gap-3 flex-wrap">
+        <div className="mt-2 px-1 flex items-center gap-1.5 flex-wrap">
           <ProjectScopePicker />
           <DomainScopePicker />
           {/* The third axis, and the only one of the three that is about the

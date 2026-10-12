@@ -125,6 +125,10 @@ export default defineConfig(({ command }) => ({
       // a JSON parse error that names neither route.
       '/apps': { target: BACKEND, changeOrigin: true },
       '/preview': { target: BACKEND, changeOrigin: true },
+      // Tested starting points a page reply builds on (`backend/starters`).
+      '/starters': { target: BACKEND, changeOrigin: true },
+      // Photographs found for a page the model described (`packs/photos`).
+      '/photos': { target: BACKEND, changeOrigin: true },
       '/artifacts': { target: BACKEND, changeOrigin: true },
       // What is listening on this machine, for the browser pane's new tab.
       // Added because `proxied.test.ts` refused the commit without it: an

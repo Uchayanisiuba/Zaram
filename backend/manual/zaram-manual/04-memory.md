@@ -38,6 +38,10 @@ When something falls due within a week, Zaram tells you once — a small notific
 
 A permanent record of every question you have ever asked is a privacy problem of its own. **Activity** lets you set how long conversations are kept, and prune them. What is pruned is recorded too.
 
+## Forgetting by date
+
+**Settings → Privacy → Forget what Zaram remembers** removes facts from before a date, from a date onwards, between two dates, or all of them. It shows how many facts that would be first, and nothing is removed until you press the button that says the number. This cannot be undone.
+
 ## Export — taking your memory with you
 
-To export your memory, open **Settings → Export**. The export is a file in an open format that holds everything Zaram remembers, so you can take your memory with you, keep a copy, or move it to another machine. Nothing is locked to Zaram.
+To export your memory, open **Settings → Privacy → Take everything with you** and press **Export everything**. You get one .zip holding everything Zaram remembers, the log of what left your computer, and the documents it made, written as JSONL, CSV and JSON — open formats that open in any text editor or spreadsheet, with no Zaram installed. Take your memory with you, keep a copy, or move it to another machine. Exporting is a copy: nothing is deleted and nothing changes. Nothing is locked to Zaram.

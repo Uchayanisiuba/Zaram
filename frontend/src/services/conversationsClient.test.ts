@@ -15,6 +15,8 @@ import {
   deleteConversation,
   fetchConversation,
   fetchConversations,
+  keptPictureUrl,
+  removeConversationPictures,
   renameConversation,
   ConversationError,
 } from './conversationsClient';
@@ -183,5 +185,51 @@ describe('failures keep the backend’s own sentence', () => {
     await expect(fetchConversation('conv_nothing')).rejects.toBeInstanceOf(
       ConversationError,
     );
+  });
+});
+
+describe('the pictures a conversation keeps', () => {
+  it('reads the pictures of a stored question, by the names the model was told', async () => {
+    capture({
+      id: 'conv_1',
+      messages: [
+        {
+          id: 'm1',
+          seq: 1,
+          role: 'user',
+          text: 'a site from this',
+          created_at: 1,
+          attachments: [
+            { id: 'att_1', name: 'me.png', kind: 'image', page_name: 'me.png', suffix: '.png' },
+            { name: 'no id, so it could never be fetched' },
+          ],
+        },
+        { id: 'm2', seq: 2, role: 'assistant', text: 'ok', created_at: 2 },
+      ],
+    });
+
+    const conversation = await fetchConversation('conv_1');
+
+    expect(conversation.messages[0].attachments).toEqual([
+      { id: 'att_1', name: 'me.png', kind: 'image', pageName: 'me.png' },
+    ]);
+    // A message from before pictures were kept has none, and does not throw.
+    expect(conversation.messages[1].attachments).toEqual([]);
+  });
+
+  it('points at the conversation that owns the picture, escaped', () => {
+    expect(keptPictureUrl('conv_1', 'att_1')).toBe('/conversations/conv_1/pictures/att_1');
+    expect(keptPictureUrl('conv/../x', 'a b')).not.toContain('conv/../x');
+  });
+
+  it('removes only the pictures, as a DELETE the browser must preflight', async () => {
+    const seen = capture({ conversation_id: 'conv_1', removed: 3, bytes: 4096 });
+
+    const result = await removeConversationPictures('conv_1');
+
+    expect(seen[0].url).toBe('/conversations/conv_1/pictures');
+    expect(seen[0].init?.method).toBe('DELETE');
+    expect((seen[0].init?.headers as Record<string, string>)['X-Zaram-Client']).toBe('zaram-ui');
+    expect(result).toEqual({ removed: 3, bytes: 4096 });
   });
 });

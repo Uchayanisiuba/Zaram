@@ -12,8 +12,7 @@
  * no tool. The screenshot is served from Zaram's own data directory by name;
  * nothing in the URL is the model's.
  */
-import { onOpen } from '@/lib/openInBrowser';
-import { useBrowserStore } from '@/stores/browserStore';
+import { onOpenApp } from '@/lib/openInBrowser';
 import { useEffect, useState } from 'react';
 import { ExternalLink, Square } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
@@ -39,7 +38,18 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
   const [phase, setPhase] = useState<'idle' | 'working' | 'stopped' | 'failed'>('idle');
 
   const image = call.image ? call.image.replace(/\\/g, '/').split('/').pop() : '';
-  const src = projectId && image ? `${API}/projects/${encodeURIComponent(projectId)}/screens/${encodeURIComponent(image)}` : '';
+  // **Two folders, told apart by the server that took the picture.** The code
+  // pack's `look_at_app` keeps a project's page under that project; any other
+  // tool -- the desktop driver reading a window, say -- returns its picture to
+  // Zaram's own folder, which belongs to no project and needs none open.
+  const fromProject = call.server === 'code';
+  const src = !image
+    ? ''
+    : fromProject
+      ? projectId
+        ? `${API}/projects/${encodeURIComponent(projectId)}/screens/${encodeURIComponent(image)}`
+        : ''
+      : `${API}/tools/pictures/${encodeURIComponent(image)}`;
   // **Fetched, never `<img src>` straight to the API.** Every request to the
   // backend must carry the API credential, and it is installed on `fetch` —
   // an image element cannot send a header, so the direct form answered 401
@@ -109,14 +119,7 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
               in the first place. */}
           <a
             href={call.appUrl}
-            onClick={(event) => {
-              if (window.zaram?.browser) {
-                event.preventDefault();
-                useBrowserStore.getState().show(call.appUrl);
-                return;
-              }
-              onOpen(call.appUrl!)(event);
-            }}
+            onClick={onOpenApp(call.appUrl)}
             rel="noreferrer"
             className="flex items-center gap-1"
             style={{ color: 'var(--color-cyan-light)', fontFamily: 'var(--font-mono)' }}
@@ -149,7 +152,7 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
           {blob ? (
             <img
               src={blob}
-              alt="Screenshot of the running app"
+              alt={fromProject ? 'Screenshot of the running app' : 'What the tool showed Zaram'}
               style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--color-border-subtle)' }}
               data-testid="app-screenshot"
             />

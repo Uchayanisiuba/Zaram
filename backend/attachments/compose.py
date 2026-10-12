@@ -285,6 +285,29 @@ def _picture_text_sections(pictures: Sequence[Attachment]) -> List[str]:
     return out
 
 
+#: The line that closes an attachment block. The chat route joins the block to
+#: the question with a blank line after it (`main.py`), so what follows this
+#: line is what the person typed.
+CLOSING_LINE = "=" * 38
+
+
+def own_words(prompt: str) -> str:
+    """The person's own message, with any attachment block in front taken off.
+
+    Decisions about *what was asked* must read this rather than the composed
+    prompt. Measured 11 October 2026: a screenshot attached to "make me a
+    portfolio website using this photo" put the words read from the picture
+    ("HTML from this page ... Make a 3D racing game") at the head of the
+    prompt, the page detector read those, judged it not a page request, and
+    the turn was offered tools and came back empty.
+    """
+    text = prompt or ""
+    if not (text.startswith("=== ") and "ATTACHED TO THIS MESSAGE ===" in text.split("\n", 1)[0]):
+        return text
+    end = text.find("\n" + CLOSING_LINE + "\n")
+    return text[end + len(CLOSING_LINE) + 2 :].lstrip("\n") if end != -1 else text
+
+
 def compose(
     attachments: Sequence[Attachment],
     question: str,
@@ -320,7 +343,7 @@ def compose(
                 "=== TEXT READ FROM PICTURES ATTACHED TO THIS MESSAGE ===\n"
                 "Read on this machine by its own text recogniser; cite it as the picture's.\n\n"
                 + "\n\n".join(picture_sections)
-                + "\n" + "=" * 38
+                + "\n" + CLOSING_LINE
             )
         return Composition(
             block=block,
@@ -395,7 +418,7 @@ def compose(
         # about following a structure, under a file that has none, is an
         # instruction to invent one.
         + (f"\n{exemplar.REFERENCE_NOTE}\n" if outlined else "")
-        + "=" * 38
+        + CLOSING_LINE
     )
 
     mode = Mode.EXCERPT if Mode.EXCERPT in modes else Mode.FULL

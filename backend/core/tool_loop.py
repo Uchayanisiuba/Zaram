@@ -44,6 +44,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from core.context_budget import CHARS_PER_TOKEN, estimate_tokens
 from core.untrusted import Provenance, scan
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,10 @@ class ToolTurn:
 
     call: ToolCall
     result: Any
+    #: Pictures the call returned, as paths in Zaram's own folder. Kept beside
+    #: the result rather than inside it, because a picture cannot travel as
+    #: prompt text -- see `McpRuntime.keep_media`.
+    images: tuple[str, ...] = ()
 
 
 #: The longest a target may be before it is cut.
@@ -265,10 +270,66 @@ def render_result(result: Any) -> str:
     quantities swapped, and it would let the loop spend a budget it believed it
     was keeping.
     """
+    said = _what_the_tool_said(result)
+    if said is not None:
+        return said
     try:
         return json.dumps(result, indent=2, default=str)
     except (TypeError, ValueError):
         return str(result)
+
+
+def _what_the_tool_said(result: Any) -> str | None:
+    """An MCP result's own words, or ``None`` for anything else.
+
+    An MCP result carries `content` -- what the server wrote for a reader --
+    and may carry `structuredContent` beside it, the same answer as data for a
+    program. Measured 10 October 2026: cua-driver's `list_apps` said what was
+    running in 554 characters of text and repeated it, with all 242 installed
+    apps, in 98 KB of structure. Rendering both as JSON put 33,000 tokens into
+    a 65,536-token window on the first call, and the task stopped before it had
+    done anything. The text is what the server meant a model to read, so it is
+    what is sent; the structure is sent only when there is no text.
+    """
+    if not isinstance(result, dict) or not isinstance(result.get("content"), list):
+        return None
+    texts = [
+        block["text"]
+        for block in result["content"]
+        if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+    ]
+    if not texts:
+        return None
+    said = "\n\n".join(texts)
+    if result.get("isError"):
+        said = "[the tool reported an error]\n" + said
+    return said
+
+
+def bounded(result: Any, max_tokens: int) -> Any:
+    """``result``, or the head of its rendering if that is over ``max_tokens``.
+
+    One result must never be larger than the room a window has to carry it:
+    the handoff keeps the most recent turns that fit, and a single turn that
+    fits nowhere is dropped -- so the task loses the very thing it just read
+    and closes having done nothing, which is what a 98 KB app list did. The cut
+    is said in the text, with how much went, so the model can ask for less
+    rather than believe it saw everything.
+    """
+    if max_tokens <= 0:
+        return result
+    rendered = render_result(result)
+    if estimate_tokens(rendered) <= max_tokens:
+        return result
+    allowance = max_tokens * CHARS_PER_TOKEN
+    # Room for the closing note, but never at the cost of the head itself: in a
+    # small window a fixed reserve would be the whole allowance.
+    keep = max(allowance // 2, allowance - 200)
+    return (
+        rendered[:keep]
+        + f"\n\n[... {len(rendered) - keep:,} more characters of this result were cut to fit the "
+        "model's context. Ask the tool for something narrower if you need the rest.]"
+    )
 
 
 def parse_call(text: str) -> ToolCall | None:

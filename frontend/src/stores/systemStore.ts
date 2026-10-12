@@ -25,13 +25,17 @@ const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
  *  the second to be visible ("a route that requires a swap must be visible in
  *  the orb's state"), and it needs its own word because the remedy differs —
  *  warming passes on its own, while a swap recurring every other message is a
- *  model-assignment problem the user can fix in Settings. */
+ *  model-assignment problem the user can fix in Settings.
+ *
+ *  `computer_use` is desktop automation via cua-driver. Added 2026-10-09. */
 export type OrbActivity =
   | 'idle'
   | 'warming'
   | 'thinking'
   /** Thinking, narrowed: the work in hand is code. See `codingActivity`. */
   | 'coding'
+  /** Thinking, narrowed: the work in hand is desktop automation. See `computerUseActivity`. */
+  | 'computer_use'
   | 'speaking'
   | 'listening'
   | 'swapping';
@@ -197,6 +201,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
     // `listening` and `swapping` are the only OrbActivity members the orb has
     // no visual for, and neither can follow a swap — so this mapping is total
     // in practice without a cast that would hide a future gap.
+    // 'coding', 'computer_use', 'thinking', 'idle' pass through; 'warming' maps to 'thinking'.
     useOrbStore.getState().setOrbState(next === 'warming' ? 'thinking' : next);
   },
 
@@ -351,6 +356,11 @@ export function describeSystem(s: {
     const where =
       locality === 'local' ? ' on this machine' : locality === 'cloud' ? ' remotely' : '';
     return { label: 'Coding', detail: `Writing code${where}.`, tone: 'busy' };
+  }
+  // Named for the same reason `coding` is: without it a reply driving the desktop
+  // read "Local · cloud ready" under an orb that was visibly working.
+  if (s.activity === 'computer_use') {
+    return { label: 'Computer use', detail: 'Working in your apps on this machine.', tone: 'busy' };
   }
   if (s.activity === 'thinking') {
     // **Read off the thing that answers, never off the machine's posture.**

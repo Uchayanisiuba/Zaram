@@ -133,6 +133,10 @@ class _Section:
     #: Tables and pictures, each with the block position it opened at, so a
     #: chart written above a fee table is still above it on the slides.
     extras: List[Tuple[int, object]] = field(default_factory=list)
+    #: The picture written under this heading as a `slide-image`. It goes on the
+    #: heading's own slide, beside the bullets, rather than on a slide of its
+    #: own: a deck author who put a picture on a slide meant that slide.
+    picture: Optional[object] = None
 
     def ordered_extras(self) -> List[object]:
         """Everything that gets its own slide, in the order it was written.
@@ -207,6 +211,10 @@ class PptxExporter:
             chunks = self._chunk(section.bullets)
             if section.divider and not any(chunk for chunk in chunks):
                 chunks = []
+            picture = section.picture
+            if picture is not None and not chunks:
+                # A divider has no content slide to carry it.
+                self._picture_slide(deck, picture)
             for index, chunk in enumerate(chunks):
                 slide = deck.slides.add_slide(deck.slide_layouts[_TITLE_AND_CONTENT])
                 slide.shapes.title.text = (
@@ -223,6 +231,8 @@ class PptxExporter:
                     paragraph.text = bullet
                     paragraph.level = 0
                 self._style(slide.placeholders[1], size=_BULLET_PT, colour=theme.INK)
+                if index == 0 and picture is not None:
+                    self._picture_beside(deck, slide, picture)
 
             for item in section.ordered_extras():
                 self._extra_slide(deck, item, section=section.heading)
@@ -305,10 +315,22 @@ class PptxExporter:
         extras += [
             (image.after_block, image)
             for image in doc.images
-            # The letterhead's mark is chrome the masthead draws, not content.
-            # A slide of somebody's logo is not what they asked for.
-            if "logo" not in image.role.split()
+            # The letterhead's mark and a CV's photo are chrome the page draws,
+            # not content. A slide of somebody's logo is not what they asked for.
+            # A `slide-image` is claimed by its section below.
+            if not ({"logo", "photo", "slide-image"} & set(image.role.split()))
         ]
+        slide_images = [
+            image for image in doc.images if "slide-image" in image.role.split()
+        ]
+        for image in slide_images:
+            index = section_at[min(image.after_block, len(section_at) - 1)] if section_at else -1
+            if index >= 0 and sections[index].picture is None:
+                sections[index].picture = image
+            else:
+                # Written before any heading, or a second picture under one:
+                # still a picture the author placed, so it gets its own slide.
+                extras.append((image.after_block, image))
 
         leading: List[object] = []
         for position, item in sorted(extras, key=lambda pair: pair[0]):
@@ -521,6 +543,38 @@ class PptxExporter:
             run.font.bold = bold
             run.font.name = face
             run.font.color.rgb = RGBColor.from_string(colour.upper())
+
+    @staticmethod
+    def _picture_beside(deck, slide, image: _reader.Image) -> None:
+        """A picture on the right of a content slide, the bullets narrowed to fit.
+
+        Only a slide that carries a picture has its body placeholder resized;
+        every other slide keeps the layout's geometry, so a theme the person
+        applies afterwards still re-applies to all of them but this one. A
+        picture python-pptx cannot measure is left out and the slide keeps its
+        bullets at full width.
+        """
+        from pptx.util import Inches
+
+        if not image.data:
+            return
+        body = slide.placeholders[1]
+        left, top, width, height = body.left, body.top, body.width, body.height
+        try:
+            picture = slide.shapes.add_picture(io.BytesIO(image.data), left, top)
+        except Exception:  # noqa: BLE001 - an unmeasurable picture is not worth failing an export
+            return
+
+        gap = Inches(0.3)
+        text_width = int((width - gap) * 0.55)
+        body.left, body.top, body.width, body.height = left, top, text_width, height
+        box_left = left + text_width + gap
+        box_width = left + width - box_left
+        scale = min(box_width / picture.width, height / picture.height, 1.0)
+        picture.width = int(picture.width * scale)
+        picture.height = int(picture.height * scale)
+        picture.left = int(box_left + (box_width - picture.width) / 2)
+        picture.top = int(top)
 
     @staticmethod
     def _picture_slide(deck, image: _reader.Image) -> None:

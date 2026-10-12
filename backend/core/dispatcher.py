@@ -123,6 +123,13 @@ class ExecutionDispatcher:
                     # is a missing branch in the engine, not cosmetic.
                     if isinstance(result, dict) and result.get("success") and result.get("artifact"):
                         yield ARTIFACT_MARKER + json.dumps(result["artifact"]) + "\n"
+                        # What the runtime could not do about a picture (an
+                        # unknown name, one that is not attached): said as a
+                        # notice, so the file is never quietly missing it.
+                        for note in result.get("notes") or []:
+                            yield NOTICE_MARKER + json.dumps(
+                                {"content": str(note), "kind": "documents"}
+                            ) + "\n"
                     else:
                         error = (
                             result.get("error", "unknown")

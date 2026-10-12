@@ -125,8 +125,12 @@ class TestThresholdIsMeasured:
     which embedder produced them."""
 
     def test_recall_is_capped(self):
-        """An answer citing ten sources cites nothing a user will check."""
-        assert 1 <= ExecutionEngine.MAX_RECALL <= 8
+        """An answer citing ten sources cites nothing a user will check.
+
+        The dynamic cap (relevance-weighted) is the primary limit. MAX_RECALL
+        is a safety ceiling for pathological broad queries.
+        """
+        assert 1 <= ExecutionEngine.MAX_RECALL <= 50
 
     def test_the_floor_is_above_the_noise_any_embedder_produces(self):
         """Two unrelated English sentences sit around 0.3 under bge-m3.

@@ -37,7 +37,10 @@ from core.execution_engine import ExecutionEngine
 from tests.test_recall_eval import CASES, CORPUS, _ollama_has_bge_m3
 
 FLOOR = ExecutionEngine.MIN_RECALL_SCORE
-SHORTLIST = ExecutionEngine.MAX_RECALL
+# SHORTLIST was the old hard cap (MAX_RECALL=6). Now the engine uses a dynamic
+# relevance-weighted cap. For test assertions that need a fixed bound, use
+# the safety ceiling (MAX_RECALL=25) as the absolute maximum.
+SHORTLIST = ExecutionEngine.MAX_RECALL  # 25 — safety ceiling, not primary cap
 
 #: Big enough to reproduce what a hundred real documents do, small enough that
 #: someone will actually run it.
@@ -199,7 +202,7 @@ def _engine_shortlist(spine, question: str) -> list[tuple[str, float]]:
     """Exactly what `ExecutionEngine._recall` hands the model.
 
     Retrieve `RECALL_CANDIDATES`, drop everything under the floor, sort by
-    relevance, cut to `MAX_RECALL`.
+    relevance, apply dynamic relevance-weighted cap (facts within 0.15 of top).
 
     Written as a mirror of the engine rather than as a general ranking view
     because the earlier tests here measured the raw order retrieval returns —
@@ -213,12 +216,30 @@ def _engine_shortlist(spine, question: str) -> list[tuple[str, float]]:
     results = loop.run_until_complete(
         runtime.retrieve(query=question, max_results=ExecutionEngine.RECALL_CANDIDATES)
     )
-    kept = sorted(
+    ranked = sorted(
         (r for r in results
          if (r.relevance if r.relevance is not None else r.score) >= FLOOR),
         key=lambda r: r.relevance if r.relevance is not None else r.score,
         reverse=True,
-    )[: ExecutionEngine.MAX_RECALL]
+    )
+    # Deduplicate (same logic as engine)
+    kept, seen = [], set()
+    for r in ranked:
+        key = " ".join(str(getattr(getattr(r, "record", None), "content", "") or "").split()).lower()
+        if key and key in seen:
+            continue
+        seen.add(key)
+        kept.append(r)
+
+    # Dynamic relevance-weighted cap (mirrors engine)
+    if kept:
+        top_relevance = (kept[0].relevance if kept[0].relevance is not None else kept[0].score)
+        dynamic_floor = max(FLOOR, top_relevance - 0.15)
+        kept = [r for r in kept if (r.relevance if r.relevance is not None else r.score) >= dynamic_floor]
+
+        # Safety ceiling
+        if len(kept) > ExecutionEngine.MAX_RECALL:
+            kept = kept[: ExecutionEngine.MAX_RECALL]
 
     out = []
     for r in kept:
@@ -516,7 +537,7 @@ class TestMarginAtScale:
             else:
                 below_floor.append((question, rank, relevance))
 
-        print(f"\n[{CORPUS_SIZE} docs] recalled in top-{SHORTLIST}: "
+        print(f"\n[{CORPUS_SIZE} docs] recalled in dynamic shortlist: "
               f"{len(fine)}/{len(answerable)} answerable targets")
         for q, rank, rel in displaced:
             print(f"  DISPLACED   rank {rank}, relevance {rel:.3f} (above floor): {q!r}")
@@ -534,47 +555,55 @@ class TestMarginAtScale:
         # was read as a finding to note rather than a failure to fix.
         assert not displaced, (
             f"a target scored above the floor and was still crowded out of the "
-            f"top {SHORTLIST}: {displaced}. That is a *depth* failure. Raise "
-            f"MAX_RECALL past the ranks reported by "
-            f"test_the_shortlist_covers_the_deepest_target."
+            f"dynamic shortlist: {displaced}. That is a *depth* failure — "
+            f"the dynamic cap (top_relevance - 0.15) excluded a relevant fact. "
+            f"Consider if the relevance spread is too wide."
         )
 
     def test_the_shortlist_covers_the_deepest_target(self, big_spine):
-        """Where MAX_RECALL's value comes from.
+        """Where the dynamic cap's coverage comes from.
 
-        The cut is a product constant, so it is measured rather than chosen:
-        this reports the rank each answerable target actually lands at, and the
-        deepest of them is the number the shortlist has to clear.
-
-        It reports rather than merely asserting, because the headroom matters as
-        much as the pass. A shortlist sitting exactly on the deepest target is
-        one near-identical invoice away from dropping it, and that is visible
-        here and nowhere else.
+        The dynamic cap keeps facts within 0.15 cosine of the top score.
+        This checks that every answerable target's relevance is within that
+        band of the top fact for its query. If a target falls outside, it
+        would be excluded by the dynamic cap — a *depth* failure.
         """
-        ranks: list[tuple[int, str]] = []
+        excluded_by_dynamic = []
         for case in (c for c in CASES if c.expected):
-            # Ranked by relevance, because relevance is what selection uses.
+            # Get all results ranked by relevance
             deep = sorted(_ranked(big_spine, case.question, 100),
                           key=lambda t: t[2], reverse=True)
-            position = next(
-                (i for i, t in enumerate(deep, start=1) if t[1] in case.expected),
-                None,
-            )
-            if position is not None:
-                ranks.append((position, case.question))
+            if not deep:
+                excluded_by_dynamic.append((case.question, "no results"))
+                continue
+            top_relevance = deep[0][2]
+            dynamic_floor = max(FLOOR, top_relevance - 0.15)
 
-        assert ranks, "no answerable target was found at all — the corpus is wrong"
+            # Find the target's relevance
+            target = next((t for t in deep if t[1] in case.expected), None)
+            if target is None:
+                excluded_by_dynamic.append((case.question, "target not in top 100"))
+                continue
 
-        deepest, worst_question = max(ranks)
-        print(f"\n[{CORPUS_SIZE} docs] target ranks by relevance: "
-              f"{sorted(r for r, _ in ranks)} — deepest {deepest} "
-              f"({worst_question!r}), shortlist {SHORTLIST}, "
-              f"headroom {SHORTLIST - deepest}")
+            target_relevance = target[2]
+            if target_relevance < dynamic_floor:
+                excluded_by_dynamic.append((
+                    case.question,
+                    f"target relevance {target_relevance:.3f} < dynamic floor {dynamic_floor:.3f} "
+                    f"(top={top_relevance:.3f})"
+                ))
 
-        assert SHORTLIST >= deepest, (
-            f"MAX_RECALL is {SHORTLIST} and a target sits at relevance rank "
-            f"{deepest} ({worst_question!r}). The shortlist cuts off a document "
-            f"that scored well enough to cite."
+        if excluded_by_dynamic:
+            print(f"\n[{CORPUS_SIZE} docs] targets excluded by dynamic cap:")
+            for q, reason in excluded_by_dynamic:
+                print(f"  {reason}: {q!r}")
+            print(f"  Dynamic cap: keep facts within 0.15 of top relevance (min {FLOOR})")
+
+        assert not excluded_by_dynamic, (
+            f"{len(excluded_by_dynamic)} target(s) would be excluded by the dynamic "
+            f"relevance-weighted cap (top_relevance - 0.15, min {FLOOR}): "
+            f"{excluded_by_dynamic}. This is a depth failure — the relevance "
+            f"spread for these queries exceeds 0.15."
         )
 
     def test_a_wider_shortlist_recovers_anything_displaced(self, big_spine):
@@ -605,6 +634,9 @@ class TestMarginAtScale:
         watch the count rather than pretend a single global threshold can be
         perfect. It is asserted to stay a small minority, because a majority
         would mean the floor has stopped meaning anything.
+
+        Checks up to the safety ceiling (MAX_RECALL=25) since for unanswerable
+        queries the dynamic cap equals the floor (no top fact to anchor the band).
         """
         total, false_cites = 0, []
         for question in UNANSWERABLE:
@@ -633,7 +665,8 @@ class TestMarginAtScale:
         """
         started = time.perf_counter()
         for case in CASES:
-            _ranked(big_spine, case.question, SHORTLIST)
+            # Use full depth for latency measurement (worst case)
+            _ranked(big_spine, case.question, CORPUS_SIZE)
         per_query = (time.perf_counter() - started) / len(CASES) * 1000
 
         print(f"\n[{CORPUS_SIZE} docs] mean recall latency: {per_query:.0f} ms")

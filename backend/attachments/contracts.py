@@ -83,6 +83,16 @@ class Attachment:
     #: could read it. Kept apart from `text` so a picture is never sized or
     #: excerpted as a document; `compose` adds it as the picture's own text.
     ocr_text: str = ""
+    #: For an image: the short, markup-safe name the model is told and a page or
+    #: document refers to it by -- `attachments/pictures.py`. `""` for a
+    #: document, and for an image no destination can use (heic).
+    page_name: str = ""
+    #: For an image restored into a new session from the copy its conversation
+    #: kept (`conversations/pictures.py`): the id it was kept under. `""` for
+    #: everything attached in this session. It is how the chat route tells a
+    #: picture it already recorded from one the person has just attached, so a
+    #: restored picture is not recorded and kept a second time.
+    kept_as: str = ""
     created_at: float = field(default_factory=time.time)
 
     @property
@@ -105,6 +115,7 @@ class Attachment:
             "pages": self.pages,
             "parser": self.parser,
             "kind": self.kind,
+            "page_name": self.page_name,
             "created_at": self.created_at,
         }
 

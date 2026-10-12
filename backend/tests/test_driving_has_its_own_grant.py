@@ -249,19 +249,19 @@ class TestTheNameGuessDoesNotWaveDrivingThrough:
     the real dev server with `drives=False` and `runs=False`.
     """
 
-    def test_the_guess_still_gets_it_wrong_on_its_own(self):
-        """The defect, asserted rather than described.
+    def test_the_guess_no_longer_reads_a_browser_as_a_look(self):
+        """Flipped 10 October 2026, as this test's earlier version asked to be.
 
-        If the word list ever changes so this passes for the right reason,
-        this test fails and says to delete it — which is the correct outcome
-        and better than it quietly becoming vacuous.
+        It asserted the guess *still* read `open_in_browser` as read-only, so the
+        day the word list was fixed it would fail and say so. It did: `_matches`
+        now accepts inflections (`deletes`, `fetching`) rather than any longer
+        word, and `browser` is no longer `browse` + "r". The pack's own override
+        below is kept anyway -- it is the built-in saying what it knows, and a
+        guess should never be the only thing between a browser launch and no grant.
         """
         from runtimes.mcp.policy import looks_read_only
 
-        assert looks_read_only(OPEN_IN_BROWSER) is True, (
-            "the name guess no longer mis-reads open_in_browser; the override "
-            "below may be unnecessary — check before removing it"
-        )
+        assert looks_read_only(OPEN_IN_BROWSER) is False
 
     def test_the_pack_says_which_of_its_tools_mislead(self, tools):
         mutative = tools.mutative_tools()

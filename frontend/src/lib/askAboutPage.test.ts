@@ -27,22 +27,25 @@ describe('what the frame reports is page text, checked and bounded', () => {
   });
 });
 
-describe('every request that changes the page asks for all of it back', () => {
-  // 5 October 2026: a change came back as only the changed lines.
+describe('every request that changes the page asks for its changes as edits', () => {
+  // 5 October 2026: a change came back as loose changed lines nobody could run.
+  // 11 October 2026: asking for the whole page instead cost twenty minutes a
+  // change, so it asks for SEARCH/REPLACE edits the window applies.
   const p = readPick(JSON.stringify(raw))!;
 
   it('a change names the part and the words', () => {
     const text = changeRequest(p, '  make it red ');
     expect(text).toContain('What to change: make it red');
     expect(text).toContain('`body > div#overlay > button#start`');
-    expect(text).toContain('reply with the whole updated page in one ```html block');
+    expect(text).toContain('SEARCH/REPLACE');
+    expect(text).toContain('Zaram applies them');
   });
 
   it('a fix carries the error and the hosts it could not load', () => {
     const text = fixRequest('THREE is not defined', ['cdn.example.com']);
     expect(text).toContain('THREE is not defined');
     expect(text).toContain('cdn.example.com');
-    expect(text).toContain('whole page in one ```html block');
+    expect(text).toContain('SEARCH/REPLACE');
   });
 
   it('an explanation does not ask for a rewrite', () => {

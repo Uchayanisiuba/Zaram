@@ -96,6 +96,17 @@ export interface ConversationSummary {
   pinned: boolean;
 }
 
+/** A picture that went with a stored user message: names and ids only. The
+ *  bytes are kept beside the conversation and fetched when a page uses one. */
+export interface StoredAttachment {
+  id: string;
+  name: string;
+  kind: string;
+  /** The name the model was told, so a page that uses the picture can be
+   *  given it again (`lib/pagePictures.ts`). Absent for a format no page uses. */
+  pageName?: string;
+}
+
 export interface StoredMessage {
   id: string;
   seq: number;
@@ -134,6 +145,9 @@ export interface StoredMessage {
    *  now** by the backend -- each says whether its fact is still there, was
    *  corrected, or was deleted. Empty is the ordinary case. */
   sources: ChatSource[];
+  /** Pictures sent with a user message. Empty on every message written before
+   *  conversations kept their pictures, and on every one that had none. */
+  attachments: StoredAttachment[];
 }
 
 export interface StoredConversation extends ConversationSummary {
@@ -168,7 +182,26 @@ function toMessage(row: Record<string, unknown>): StoredMessage {
     plan: isPlan(row.plan) ? row.plan : null,
     artifactIds: Array.isArray(row.artifactIds) ? (row.artifactIds as string[]).map(String) : [],
     sources: Array.isArray(row.sources) ? (row.sources as ChatSource[]) : [],
+    attachments: toAttachments(row.attachments),
   };
+}
+
+/** Stored pictures as the message shows them. Checked rather than cast: this
+ *  comes off disk, and an entry without an id could never be fetched. */
+function toAttachments(value: unknown): StoredAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const out: StoredAttachment[] = [];
+  for (const item of value as Array<Record<string, unknown>>) {
+    if (!item || typeof item.id !== 'string' || !item.id) continue;
+    const pageName = typeof item.page_name === 'string' && item.page_name ? item.page_name : undefined;
+    out.push({
+      id: item.id,
+      name: String(item.name ?? item.id),
+      kind: String(item.kind ?? 'image'),
+      ...(pageName ? { pageName } : {}),
+    });
+  }
+  return out;
 }
 
 /** A stored plan, or something that is not one.
@@ -285,4 +318,27 @@ export async function deleteConversation(id: string): Promise<{ note: string }> 
     unknown
   >;
   return { note: String(body.note ?? '') };
+}
+
+/** Where a picture kept with a conversation is served from. Relative to the
+ *  same API as every other call here, so the proxy and the credential apply. */
+export function keptPictureUrl(conversationId: string, attachmentId: string): string {
+  return `${API_BASE}/conversations/${encodeURIComponent(conversationId)}/pictures/${encodeURIComponent(attachmentId)}`;
+}
+
+/**
+ * Remove the pictures kept with one conversation, and nothing else.
+ *
+ * The way a person shortens how long Zaram holds their photographs without
+ * losing the conversation: the transcript and its pages stay, and a page that
+ * used a picture shows the "no longer attached" placeholder, which says so.
+ */
+export async function removeConversationPictures(
+  id: string,
+): Promise<{ removed: number; bytes: number }> {
+  const body = (await send(
+    `/conversations/${encodeURIComponent(id)}/pictures`,
+    'DELETE',
+  )) as Record<string, unknown>;
+  return { removed: Number(body.removed ?? 0), bytes: Number(body.bytes ?? 0) };
 }

@@ -21,6 +21,7 @@ const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
  *  backend and never arrived here, so a slide deck's card had no icon and no
  *  colour — `Record<ArtifactKind, …>` cannot catch a member it does not know
  *  exists. `cv` is added with it.
+ *  `presentation` (Presenton-generated) added alongside `deck` (outline-based).
  */
 export type ArtifactKind =
   | 'invoice'
@@ -29,7 +30,9 @@ export type ArtifactKind =
   | 'chart'
   | 'deck'
   | 'cv'
-  | 'image';
+  | 'image'
+  | 'video'
+  | 'presentation';
 
 export const KIND_LABELS: Record<ArtifactKind, string> = {
   invoice: 'Invoices',
@@ -39,6 +42,8 @@ export const KIND_LABELS: Record<ArtifactKind, string> = {
   deck: 'Decks',
   cv: 'CVs',
   image: 'Images',
+  video: 'Videos',
+  presentation: 'Presentations',
 };
 
 /** Kinds whose file *is* a picture, so a thumbnail says more than a filename.
@@ -48,13 +53,16 @@ export const KIND_LABELS: Record<ArtifactKind, string> = {
  *  two kinds, because a chart is derived from numbers the user has and always
  *  carries the data table that makes it checkable, while an image is drawn
  *  from a description and has nothing behind it to check.
- *
+ *  
+ *  Video and presentation are also pictorial — they render as thumbnails.
  *  Used for density rather than for behaviour: Work draws these as a grid of
  *  thumbnails and everything else as rows, because a page of pictures is
  *  browsable in a way a page of filenames is not. */
 export const PICTORIAL_KINDS: ReadonlySet<ArtifactKind> = new Set<ArtifactKind>([
   'image',
   'chart',
+  'video',
+  'presentation',
 ]);
 
 /** Where an artifact drew on. Mirrors `ChatSource` in chatClient — provenance

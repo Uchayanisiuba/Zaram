@@ -147,6 +147,16 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
     ring2Color: 'rgba(34,211,238,0.35)',
     filter: 'drop-shadow(0 0 40px rgba(168,85,247,0.65))',
   },
+  // `computer_use` wears `coding`'s chrome: it is thinking with the work named,
+  // by the label and not by a colour. A new colour here would put a legend back
+  // on the one indicator whose value is not needing one.
+  computer_use: {
+    glowColor: glowOf('coding', 0.45),
+    glowColor2: 'rgba(99,102,241,0.32)',
+    ring1Color: 'rgba(168,85,247,0.40)',
+    ring2Color: 'rgba(34,211,238,0.35)',
+    filter: 'drop-shadow(0 0 40px rgba(168,85,247,0.65))',
+  },
   speaking: {
     glowColor: glowOf('speaking', 0.35),
     glowColor2: 'rgba(34,211,238,0.28)',
@@ -277,7 +287,7 @@ const LivingOrb = ({
 
       {/* Thinking multi-color pulse overlay */}
       <AnimatePresence>
-        {(state === 'thinking' || state === 'coding') && (
+        {(state === 'thinking' || state === 'coding' || state === 'computer_use') && (
           <motion.div
             className="absolute rounded-full pointer-events-none"
             style={{ inset: -outerGlowOffset, filter: 'blur(20px)' }}
@@ -512,6 +522,7 @@ export const SHEEN_SECONDS: Record<OrbState, number> = {
   idle: 26,
   thinking: 5,
   coding: 6,
+  computer_use: 6,
   speaking: 7,
   listening: 9,
   swapping: 14,

@@ -26,8 +26,10 @@ survives into the preview looking correct and disappears on export to .docx
 with nothing reporting it. Restricting the set to what the readers already
 handle is what keeps the preview and the exported file the same document.
 
-`img` is dropped and its alt text kept. A markdown image names a URL, and a
-generated document that fetches one is a remote asset arriving inside a data
+`img` is dropped and its alt text kept -- except a paragraph that is only the
+image of a picture the person attached, by the name Zaram gave it, which becomes
+a block carrying that picture's bytes (`pictures=`). A markdown image names a
+URL, and a generated document that fetches one is a remote asset arriving inside a data
 file — the class `check-no-remote-assets.mjs` exists to prevent, by a route
 that check cannot see because it scans source rather than output.
 
@@ -40,20 +42,46 @@ from __future__ import annotations
 
 import html as html_escape
 from html.parser import HTMLParser
-from typing import Any, List
+import re
+from typing import Any, List, Mapping, Optional
 
 from .contracts import (
     BulletList,
     Callout,
     Divider,
     Heading,
+    ImageBlock,
     Metric,
     RichText,
     Statement,
     TableBlock,
 )
 
-__all__ = ["blocks_from_markdown", "inline_html"]
+__all__ = ["blocks_from_markdown", "inline_html", "photo_key", "PHOTO_REFERENCE"]
+
+#: A web photo named in a document: `![alt](photo:short description)`. Written
+#: by the model when the person asked for photos from the web, resolved by the
+#: documents runtime before the blocks are built (`core/sourced_pictures.py`).
+PHOTO_REFERENCE = re.compile(r"!\[[^\]]*\]\(\s*<?photo:([^)>\n]+?)>?\s*\)", re.IGNORECASE)
+
+#: The same reference, for rewriting. Markdown takes no spaces in a bare
+#: address and a description has them, so it is wrapped in `<>` -- CommonMark's
+#: own form for an address with spaces -- before the text is parsed.
+_BARE_PHOTO = re.compile(r"(!\[[^\]]*\]\()\s*(photo:[^)>\n]+?)\s*\)", re.IGNORECASE)
+
+
+def photo_key(src: str) -> str:
+    """The identity of a `photo:` address: lower case, words only.
+
+    The same idea as the photo pack's `description_key`, kept here so this
+    module needs nothing from the pack: a stray space or a capital letter must
+    not make one photo two.
+    """
+    from urllib.parse import unquote
+
+    src = unquote(src)  # the parser percent-encodes the spaces
+    text = src[len("photo:"):] if src.lower().startswith("photo:") else src
+    return "photo:" + " ".join(re.findall(r"[^\W_]+", text.lower(), re.UNICODE))
 
 #: The inline tags kept verbatim. Exactly `_reader._STYLE_TAGS` plus `br`.
 #: A literal rather than an import, so that widening one is a deliberate edit
@@ -203,8 +231,52 @@ def _design_block(info: str, body: str):
     return Metric(items=tuple(items)) if items else None
 
 
+def _picture_block(inline: Any, pictures: Mapping[str, Any], placed: Optional[List[str]]):
+    """The picture a paragraph is made only of, or ``None``.
+
+    A paragraph that is nothing but `![alt](photo-1.jpg)` is a request to place
+    that attached picture here. Only a name Zaram handed out is honoured -- the
+    path in front of it is ignored and the match is case-blind -- so a markdown
+    image can never make a document fetch anything: an address, a path and an
+    unknown name all fall through to the alt text, as every image did before.
+    Pictures inside a sentence are left as alt text too: a block image has a
+    place in the page and an inline one would need a size.
+    """
+    children = getattr(inline, "children", None) or []
+    if len(children) != 1 or children[0].type != "image":
+        return None
+    image = children[0]
+    src = str(image.attrGet("src") or "")
+    if src.lower().startswith("photo:"):
+        # A web photo, found on this machine before the blocks were built and
+        # handed in under its key. Never fetched here: a photo that was not
+        # found falls through to its alt text, as every image always has.
+        picture = pictures.get(photo_key(src))
+        if picture is None:
+            return None
+        if placed is not None and picture.name not in placed:
+            placed.append(picture.name)
+        return ImageBlock(data=picture.data, alt=str(image.content or ""), media_type=picture.media_type)
+    if re.match(r"^[a-z][a-z0-9+.-]*:|^//", src, re.IGNORECASE):
+        return None
+    wanted = re.split(r"[?#]", src)[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    picture = pictures.get(wanted)
+    if picture is None:
+        return None
+    if placed is not None and picture.name not in placed:
+        placed.append(picture.name)
+    return ImageBlock(
+        data=picture.data, alt=str(image.content or ""), media_type=picture.media_type
+    )
+
+
 def blocks_from_markdown(
-    markdown: str, *, base_level: int = 2, title: str = ""
+    markdown: str,
+    *,
+    base_level: int = 2,
+    title: str = "",
+    pictures: Optional[Mapping[str, Any]] = None,
+    placed: Optional[List[str]] = None,
 ) -> List[Any]:
     """A markdown document as blocks `render_document` understands.
 
@@ -228,9 +300,14 @@ def blocks_from_markdown(
 
     ``base_level`` defaults to 2 because `<h1>` is the title, set once by the
     masthead, and `Heading` refuses level 1 outright.
+
+    ``pictures`` maps a lower-cased attachment name to its bytes
+    (`attachments.pictures.DocumentPicture`); a paragraph that is only an image
+    of one of those names becomes an `ImageBlock`. ``placed`` collects the
+    names that were, so the caller can record where the pictures came from.
     """
     md = _md()
-    tokens = md.parse(_unfence(markdown or ""))
+    tokens = md.parse(_BARE_PHOTO.sub(r"\1<\2>)", _unfence(markdown or "")))
     blocks: List[Any] = []
 
     i = 0
@@ -246,6 +323,12 @@ def blocks_from_markdown(
             continue
 
         if token.type == "paragraph_open":
+            if pictures:
+                block = _picture_block(tokens[i + 1], pictures, placed)
+                if block is not None:
+                    blocks.append(block)
+                    i += 3
+                    continue
             rich = inline_html(tokens[i + 1].content)
             if rich.html.strip():
                 blocks.append(rich)

@@ -15,12 +15,14 @@ adding it there recreates that exactly.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Callable, List, Optional, Sequence
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .citations import FactLookup, resolve_sources
+from .pictures import ConversationPictures, media_type_of
 from .records import ConversationRecords, UnknownConversation
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -45,6 +47,34 @@ def set_fact_lookup(lookup: Optional[FactLookup]) -> None:
     """
     global _FACT_LOOKUP
     _FACT_LOOKUP = lookup
+
+
+_PICTURES: Optional[ConversationPictures] = None
+_ON_PICTURES_REMOVED: Optional[Callable[[Sequence[str]], None]] = None
+
+
+def set_pictures(
+    pictures: Optional[ConversationPictures],
+    *,
+    on_removed: Optional[Callable[[Sequence[str]], None]] = None,
+) -> None:
+    """Attach the folder of kept pictures (called from `main.py`).
+
+    ``on_removed`` is told the attachment ids whose kept copies were just
+    removed, so the live session can let go of its own working copies too.
+    Without that, "remove this conversation's pictures" would leave the same
+    picture still showing on a page until the next restart -- a removal that
+    looks like it did nothing. Injected rather than imported: this package does
+    not depend on the attachment store.
+    """
+    global _PICTURES, _ON_PICTURES_REMOVED
+    _PICTURES = pictures
+    _ON_PICTURES_REMOVED = on_removed
+
+
+def pictures_store() -> Optional[ConversationPictures]:
+    """The kept pictures, or ``None`` where none are attached (a bare test app)."""
+    return _PICTURES
 
 
 def _records() -> ConversationRecords:
@@ -90,6 +120,10 @@ def _message_dict(message) -> dict:
         # reads a whole conversation, not here: this is also what the list and
         # export paths see, and they have no business looking facts up.
         "sources": [dict(s) for s in message.sources],
+        # The pictures that went with a user message -- names and ids only. The
+        # bytes are fetched from `/conversations/{id}/pictures/{attachment_id}`
+        # when a page that uses one is shown.
+        "attachments": [dict(a) for a in message.attachments],
     }
 
 
@@ -214,15 +248,88 @@ async def delete_conversation(conversation_id: str) -> dict:
     here would make a delete larger than the one that was asked for.
     """
     records = _records()
+    # Read before the rows go: the ids of the pictures it held are on the
+    # messages that are about to be deleted.
+    picture_ids = _picture_ids(records, conversation_id)
     try:
         records.delete(conversation_id)
     except UnknownConversation:
         raise HTTPException(status_code=404, detail="No such conversation")
+    # The pictures kept beside it go with it -- they are part of the transcript.
+    _forget_pictures(conversation_id, picture_ids)
     return {
         "deleted": conversation_id,
         "facts_removed": 0,
         "note": (
-            "The transcript is gone. Facts Zaram remembered from it are still "
-            "in Memory, where they can be corrected or deleted individually."
+            "The transcript and the pictures kept with it are gone. Facts Zaram "
+            "remembered from it are still in Memory, where they can be corrected "
+            "or deleted individually."
         ),
     }
+
+
+def _picture_ids(records: ConversationRecords, conversation_id: str) -> List[str]:
+    """Every attachment id this conversation kept, from the folder and the messages."""
+    found = set(_PICTURES.ids(conversation_id)) if _PICTURES is not None else set()
+    try:
+        for message in records.messages(conversation_id):
+            found.update(str(a.get("id")) for a in message.attachments if a.get("id"))
+    except UnknownConversation:
+        pass
+    return sorted(found)
+
+
+def _forget_pictures(conversation_id: str, picture_ids: Sequence[str]) -> tuple:
+    """Remove the kept copies and let the live session drop its own. ``(files, bytes)``."""
+    removed = (0, 0)
+    if _PICTURES is not None:
+        removed = _PICTURES.remove_conversation(conversation_id)
+    if _ON_PICTURES_REMOVED is not None and picture_ids:
+        try:
+            _ON_PICTURES_REMOVED(list(picture_ids))
+        except Exception:  # noqa: BLE001 - the removal itself is done; this is tidying
+            pass
+    return removed
+
+
+@router.get("/{conversation_id}/pictures/{attachment_id}")
+async def read_conversation_picture(conversation_id: str, attachment_id: str):
+    """A picture kept with this conversation, for a page that uses it.
+
+    Served to the window and nowhere else: never indexed, never recalled. The
+    conversation has to exist and the picture has to be in *its* folder -- an
+    id from another conversation, or one that is not an attachment id at all,
+    answers 404. The media type is read from the bytes, never from a file name,
+    because it ends up in a `data:` URI a browser honours. Working data, so
+    `no-store`.
+    """
+    records = _records()
+    try:
+        records.get(conversation_id)
+    except UnknownConversation:
+        raise HTTPException(status_code=404, detail="No such conversation")
+    raw = _PICTURES.read(conversation_id, attachment_id) if _PICTURES is not None else None
+    if raw is None:
+        raise HTTPException(status_code=404, detail="That picture is no longer kept.")
+    media_type = media_type_of(raw)
+    if media_type is None:
+        raise HTTPException(status_code=415, detail="That picture is in a format a page cannot show.")
+    return Response(content=raw, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+
+@router.delete("/{conversation_id}/pictures")
+async def remove_conversation_pictures(conversation_id: str) -> dict:
+    """Remove the pictures kept with a conversation and nothing else.
+
+    The way a person shortens retention without losing the conversation (see
+    `pictures.py`). The transcript and its pages stay; a page that used a
+    picture shows the "no longer attached" placeholder, which says so.
+    """
+    records = _records()
+    picture_ids = _picture_ids(records, conversation_id)
+    try:
+        records.get(conversation_id)
+    except UnknownConversation:
+        raise HTTPException(status_code=404, detail="No such conversation")
+    files, size = _forget_pictures(conversation_id, picture_ids)
+    return {"conversation_id": conversation_id, "removed": files, "bytes": size}

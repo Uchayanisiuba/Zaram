@@ -19,6 +19,7 @@ class KernelBootstrapper:
         self.mcp_runtime = None
         self.semantic_router = None
         self.egress_gate = None
+        self.pipeline = None
         #: Whether `boot()` has completed. See the guard there.
         self.booted = False
 
@@ -121,6 +122,9 @@ class KernelBootstrapper:
             self.registry, self.event_bus, semantic_router=self.semantic_router
         )
 
+        # Initialize Pipeline (Phase 1)
+        self._init_pipeline()
+
         # Let the engine ask whether a route forces a model out of VRAM, so a
         # swap can be announced before the user spends the seconds rather than
         # during them. Attached after construction because the providers
@@ -142,6 +146,22 @@ class KernelBootstrapper:
         from packs.code import active_root
 
         self.execution_engine.set_code_project_open(lambda: active_root() is not None)
+
+        # The pictures a person attached, as names a document may place. Read
+        # lazily from the documents runtime, which is made later in boot.
+        from attachments.pictures import refs_for_session
+
+        def _picture_names(session_id: str, request: str):
+            documents = self.documents_runtime
+            if documents is None or not documents.places_pictures(request):
+                return []
+            return refs_for_session(session_id)
+
+        def _picture_slot(request: str) -> str:
+            documents = self.documents_runtime
+            return documents.picture_slot(request) if documents is not None else ""
+
+        self.execution_engine.set_picture_names(_picture_names, _picture_slot)
 
         self.booted = True
         print("[Bootstrapper] Kernel Ready.")
@@ -167,6 +187,81 @@ class KernelBootstrapper:
         except Exception as error:
             print(f"[Bootstrapper] Semantic routing unavailable ({error}); using keywords.")
             return None
+
+    def _init_pipeline(self):
+        """Initialize the Phase 1 Pipeline with built-in filters."""
+        try:
+            from core.pipeline import (
+                Pipeline,
+                FilterRegistry,
+                FilterPriority,
+            )
+            from core.pipeline.builtins import (
+                SpineInjector,
+                EgressGuard,
+                PIIScrubber,
+                TokenBudgetEnforcer,
+                ModelParamNormalizer,
+                CitationValidator,
+            )
+            from core.egress import get_gate
+            from core.context_budget import budget_for
+
+            # Create registry
+            registry = FilterRegistry()
+
+            # Get egress gate
+            egress_gate = get_gate()
+
+            # Create and register inlet filters
+            spine_injector = SpineInjector(
+                memory_runtime=self.memory_runtime,
+                max_facts=6,
+                min_relevance=0.3,
+            )
+            registry.register_inlet(spine_injector, FilterPriority.CONTEXT, "spine_injector")
+
+            token_budget = TokenBudgetEnforcer(
+                model=None,  # Will use budget_for at runtime
+                reserve_tokens=1000,
+                context_budget=None,
+            )
+            registry.register_inlet(token_budget, FilterPriority.CONTEXT, "token_budget")
+
+            model_param_normalizer = ModelParamNormalizer(
+                model_registry=self.registry,  # Use runtime registry for model info
+            )
+            registry.register_inlet(model_param_normalizer, FilterPriority.TRANSFORM, "model_param_normalizer")
+
+            # Create and register outlet filters
+            egress_guard = EgressGuard(egress_gate=egress_gate)
+            registry.register_outlet(egress_guard, FilterPriority.SECURITY, "egress_guard")
+
+            pii_scrubber = PIIScrubber()
+            registry.register_outlet(pii_scrubber, FilterPriority.SECURITY, "pii_scrubber")
+
+            citation_validator = CitationValidator(
+                memory_runtime=self.memory_runtime,
+                strip_invalid=True,
+                log_failures=True,
+            )
+            registry.register_outlet(citation_validator, FilterPriority.TRANSFORM, "citation_validator")
+
+            # Create pipeline
+            self.pipeline = Pipeline(
+                registry=registry,
+                egress_gate=egress_gate,
+                spine=self.memory_runtime,
+            )
+
+            # Set global pipeline instance
+            from core.pipeline.pipeline import set_pipeline
+            set_pipeline(self.pipeline)
+
+            print(f"[Bootstrapper] Pipeline initialized with {len(registry.get_inlet_filters())} inlet and {len(registry.get_outlet_filters())} outlet filters")
+        except Exception as error:
+            print(f"[Bootstrapper] Pipeline initialization failed ({error}); continuing without pipeline.")
+            self.pipeline = None
 
     def _init_memory_runtime(self):
         import os
@@ -334,6 +429,8 @@ class KernelBootstrapper:
         Registers all active Runtimes with the Registry.
         Future Runtimes (World) will be added here.
         """
+        import os
+
         # --- Memory Runtime ---
         self.registry.register(self.memory_runtime)
         register_runtime_for_health(self.memory_runtime)
@@ -409,6 +506,9 @@ class KernelBootstrapper:
         self.registry.register(self.documents_runtime)
         await self.documents_runtime.initialize()
         register_runtime_for_health(self.documents_runtime)
+        from attachments.pictures import document_pictures_for_session
+
+        self.documents_runtime.set_pictures(document_pictures_for_session)
 
         # --- Images Runtime ---
         # The same tier and the same service as documents, sharing one
@@ -461,6 +561,55 @@ class KernelBootstrapper:
         self.registry.register(self.images_runtime)
         await self.images_runtime.initialize()
         register_runtime_for_health(self.images_runtime)
+
+        # --- Motion Runtime ---
+        # Generative tier: creates new video artifacts and changes nothing existing.
+        # Uses the same ArtifactService as documents/images. Code-to-Frame pipeline:
+        # LLM → MotionScript → HTML5 timeline → Playwright → WebM/MP4.
+        # Only registers if ZARAM_MOTION_ENABLED=1 and Playwright available.
+        if os.getenv("ZARAM_MOTION_ENABLED", "0") == "1":
+            from modules.motion.runtime import MotionRuntime, check_playwright_available
+            if check_playwright_available():
+                self.motion_runtime = MotionRuntime(
+                    artifact_service,
+                    self.event_bus,
+                    complete=models_runtime.complete,
+                )
+                self.registry.register(self.motion_runtime)
+                await self.motion_runtime.initialize()
+                register_runtime_for_health(self.motion_runtime)
+            else:
+                print("[Bootstrapper] Motion Runtime skipped: Playwright not available")
+        else:
+            print("[Bootstrapper] Motion Runtime disabled (set ZARAM_MOTION_ENABLED=1 to enable)")
+
+        # --- Presenton Runtime ---
+        # Generative tier: creates new presentation artifacts via Presenton engine.
+        # LLM → PresentationScript → Presenton IR → Presenton CLI → PPTX/PDF.
+        # Only registers if Presenton CLI is available.
+        from modules.presenton.runtime import PresentonRuntime
+        import subprocess
+        presenton_available = False
+        try:
+            subprocess.run(["presenton", "--version"], check=True, capture_output=True, timeout=5)
+            presenton_available = True
+        except Exception:
+            pass
+        
+        if presenton_available:
+            self.presenton_runtime = PresentonRuntime(
+                artifact_service,
+                self.event_bus,
+                model_resolver=lambda cap: self.models_runtime.resolve_model(cap) if self.models_runtime else None,
+                provider_manager=self.providers_runtime,
+                complete=models_runtime.complete,
+            )
+            self.registry.register(self.presenton_runtime)
+            await self.presenton_runtime.initialize()
+            register_runtime_for_health(self.presenton_runtime)
+            print("[Bootstrapper] Presenton Runtime registered")
+        else:
+            print("[Bootstrapper] Presenton Runtime skipped: Presenton CLI not installed (pip install presenton)")
 
         # Tools other people wrote. Registered here rather than left to a
         # caller that does not exist yet, because an unregistered runtime is
@@ -613,6 +762,39 @@ class KernelBootstrapper:
             ServerConfig(server_id=DRAW_SERVER),
             DrawTools(lambda capability, payload: run_sync(images_runtime.execute(capability, payload))),
         )
+
+        # Zaram Self: built-in settings control server.
+        # Always attached, HOST_UNDO — changes apply immediately, undone by the user in Settings.
+        from runtimes.mcp.zaram_self import create_self_server
+
+        self.mcp_runtime.register_builtin(
+            ServerConfig(server_id="zaram-self", writes=WriteMode.HOST_UNDO),
+            create_self_server(),
+        )
+
+        # Zaram Memory: built-in MCP server exposing Spine as tools.
+        # Registered last so it's available to all other tools and agents.
+        from runtimes.mcp.memory_server_adapter import create_memory_mcp_server
+        from core.egress import get_gate
+
+        # Get credential from egress gate's pairing mechanism
+        credential = None
+        try:
+            from zaram_mcp import CREDENTIAL_ENV
+            import os
+            credential = os.environ.get(CREDENTIAL_ENV)
+        except Exception:
+            pass
+
+        if credential:
+            memory_server = create_memory_mcp_server(credential)
+            self.mcp_runtime.register_builtin(
+                ServerConfig(server_id="zaram-memory", writes=WriteMode.HOST_UNDO),
+                memory_server,
+            )
+            print("[Bootstrapper] Registered Zaram Memory MCP server")
+        else:
+            print("[Bootstrapper] Zaram Memory MCP server skipped: no credential available")
 
         # The job-hunt pack: `record_job_posting`, so a posting the model
         # found on a Monday-morning run becomes facts, a closing date and a

@@ -17,7 +17,7 @@ import os
 import time
 import uuid
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Optional
 from typing import Any
@@ -28,8 +28,61 @@ from core.contracts import (
     PlanState,
 )
 from core.query_classifier import SEARCH_MARKER, needs_search
+from core.open_project import about_the_open_project
+from core.sourced_pictures import asks_to_source_pictures, document_photo_guidance
 
 logger = logging.getLogger(__name__)
+
+
+#: A picture named as a thing: what a drawing request asks for, and what a site
+#: is filled with.
+_PICTURE_NOUN = re.compile(
+    r"\b(?:images?|pictures?|photos?|photographs?|illustrations?|logos?|icons?|drawings?|artwork|banners?|graphics?)\b",
+    re.IGNORECASE,
+)
+
+
+#: Names a written thing to be made -- a report, a brochure, a PDF. Read only
+#: to send a request that asked for web photos to the document plan rather than
+#: the chat; never used to route anything on its own.
+_A_DOCUMENT = re.compile(
+    r"\b(?:document|doc|docx|word\s+file|pdf|report|brochure|flyer|leaflet|booklet|handout|"
+    r"guide|proposal|letter|memo|article|essay|newsletter|catalogue|catalog|menu|"
+    r"deck|slides|slide\s+deck|presentation|powerpoint|pptx)\b",
+    re.IGNORECASE,
+)
+
+
+def _names_a_document(asked: str) -> bool:
+    return bool(_A_DOCUMENT.search(asked or ""))
+
+
+def _builds_a_page(asked: str) -> bool:
+    from core.page_guidance import asks_to_build_a_page
+
+    return asks_to_build_a_page(asked or "")
+
+
+def _a_page_with_pictures_in_it(asked: str) -> bool:
+    """Whether a request asks for a page, with any pictures as part of it.
+
+    The test is **order**: the page is named first and the pictures after it
+    ("build a resort website ... images you need") -- the pictures are content
+    of the page. A picture named first ("generate an image for my website",
+    "make a logo for my web app") is a drawing *for* a page, and stays one.
+    A page request that names no picture at all is a page too: whatever made
+    the classifier read a drawing or a file search into it, nothing was asked
+    to be drawn.
+    """
+    from core.page_guidance import _BUILD_A_PAGE
+
+    page = _BUILD_A_PAGE.search(asked or "")
+    if page is None:
+        return False
+    picture = _PICTURE_NOUN.search(asked)
+    if picture is None:
+        return True
+    return picture.start() > page.start(2)
 
 
 #: Values of ``ZARAM_WEB_SEARCH`` that mean yes. Anything else present means no.
@@ -273,6 +326,44 @@ def _document_body_prompt(request: str) -> str:
     return instruction(request)
 
 
+def _asked(prompt: str) -> str:
+    """The person's own words, with any attached files' text taken off the front.
+
+    **What was asked is decided from what was typed.** The chat route puts an
+    attachment block in front of the message -- a document's contents, or text
+    read off a picture -- and that text is third party: it can say "search the
+    web for", "click", "settings" or "Save" without anyone having asked for
+    any of it. Measured 11 October 2026: a screenshot of Zaram's own interface
+    attached to "make me a portfolio website using this photo" was read as a
+    tool request and the page was written behind an empty bubble. A document
+    containing "search the web for..." could equally have turned a plain
+    question into a search that sent its words to a search engine.
+
+    One function so classification and the plan's keyword checks cannot read
+    different texts. Falls back to the whole prompt, which is the old behaviour,
+    if the attachments package cannot be imported -- classification must never
+    be the thing that fails a request.
+    """
+    try:
+        from attachments.compose import own_words
+    except Exception:  # noqa: BLE001 - routing must never fail a request
+        return prompt
+    return own_words(prompt)
+
+
+def _attached_text(prompt: str, asked: str) -> str:
+    """The attachment block that stood in front of ``asked`` in ``prompt``.
+
+    `own_words` returns a suffix of the prompt, so what precedes it is the
+    block and the blank line joining it to the question. Empty when nothing was
+    attached. Used to hand the model the file again on a step whose
+    instruction is built from the person's words alone.
+    """
+    if asked == prompt or not prompt.endswith(asked):
+        return ""
+    return prompt[: len(prompt) - len(asked)]
+
+
 class IntentType(Enum):
     """High-level intent categories used for routing and planning."""
     CONVERSATION = "conversation"
@@ -292,6 +383,8 @@ class IntentType(Enum):
     #: attachment, which is a guess about what somebody meant rather than a
     #: classification of what they said.
     IMAGE = "image"
+    #: "Animate this" / "Create motion graphics" — produces a video, generative tier.
+    MOTION = "motion"
     #: "Why does this function return None." Answered by `reasoning.generate`
     #: like an ordinary question — this intent exists to select a *model*, not
     #: a capability, which is the one thing no other intent here does.
@@ -310,6 +403,14 @@ class IntentType(Enum):
     #: consent dialog buy speed over a model that is already resident, on a
     #: product whose maintainer asked for fewer dialogs the same day.
     TRANSLATE = "translate"
+    #: "Click the save button", "type into the search box", "scroll the window".
+    #: Computer-use actions via cua-driver or similar MCP servers. Routes to
+    #: local model for speed (proximity beats capability for habit).
+    COMPUTER_USE = "computer_use"
+    #: "Switch to avatar", "set voice to bella", "schedule avatar at 9pm",
+    #: "change routing to local", "rename assistant to Ada".
+    #: Settings changes via zaram-self MCP server. Routes to local model for speed.
+    SETTINGS = "settings"
     UNKNOWN = "unknown"
 
 
@@ -359,7 +460,18 @@ class IntentClassification:
     #: confident paragraph about a picture it never made. Rule 9 in a new
     #: medium, and the silent version of it.
     requires_image_output: bool = False
+    #: The reply should be a motion graphics video rather than prose.
+    #:
+    #: This is a modality gate (like requires_image_output), not a ranking signal.
+    #: A model that cannot emit video must not be asked to generate motion.
+    requires_motion: bool = False
     requires_speech: bool = False
+    #: The request wants to control the desktop (click, type, scroll, etc.).
+    #: This routes to computer-use tools via MCP (e.g., cua-driver).
+    requires_computer_use: bool = False
+    #: The request wants to change Zaram's own settings (renderer, voice, routing, etc.).
+    #: This routes to zaram-self tools via MCP.
+    requires_settings: bool = False
     #: The question wanted live information and the policy refused it.
     #:
     #: Not the negation of `requires_search` — that is false for every ordinary
@@ -450,6 +562,14 @@ class IntentRouter:
         "illustration of", "logo for", "paint me", "photorealistic",
     }
 
+    #: Asking for motion graphics / video generation.
+    #: Checked before image to avoid "animate this" being caught by image keywords.
+    _MOTION_KEYWORDS = {
+        "animate", "animation", "motion graphics", "motion design",
+        "timeline", "keyframe", "keyframes", "motion video",
+        "animate this", "make it move", "add motion",
+    }
+
     #: Formats a **language model writes directly**, and an image model cannot.
     #:
     #: Found 4 October 2026 by sending the resident model the sentence a person
@@ -499,6 +619,17 @@ class IntentRouter:
         return bool(cls._matches((prompt or "").lower(), cls._IMAGE_KEYWORDS)) or cls._asks_for_a_drawing(prompt)
 
     @classmethod
+    def _wants_motion(cls, prompt: str) -> bool:
+        """Whether this asks for motion graphics/video generation.
+
+        Checked before image to avoid "animate this" being caught by image keywords.
+        This is a precondition check (modality gate), not a similarity judgement.
+        """
+        if cls._names_a_text_format(prompt):
+            return False
+        return bool(cls._matches((prompt or "").lower(), cls._MOTION_KEYWORDS))
+
+    @classmethod
     def _asks_for_text_art(cls, prompt: str) -> bool:
         """Something visual, asked for **in a format a language model writes**.
 
@@ -520,6 +651,26 @@ class IntentRouter:
         # still a question for a model that can see.
         picture = cls._mentions_a_new_picture(prompt)
         return making or picture
+
+    @classmethod
+    def _wants_computer_use(cls, prompt: str) -> bool:
+        """Whether the prompt asks for desktop automation (click, type, scroll, etc.).
+
+        This is a precondition check (modality gate), not a similarity judgement.
+        Phrases are used rather than single words to avoid false positives.
+        """
+        text = (prompt or "").lower().strip()
+        return bool(cls._matches(text, cls._COMPUTER_USE_KEYWORDS)) or text.startswith(cls._DESKTOP_VERBS)
+
+    @classmethod
+    def _wants_settings(cls, prompt: str) -> bool:
+        """Whether the prompt asks to change Zaram's own settings.
+
+        This is a precondition check (modality gate), not a similarity judgement.
+        Phrases are used rather than single words to avoid false positives.
+        """
+        text = (prompt or "").lower()
+        return bool(cls._matches(text, cls._SETTINGS_KEYWORDS)) or bool(cls._PERMISSION_PATTERN.search(text))
 
     #: Verbs that make a thing, for `_asks_for_a_drawing`.
     #:
@@ -810,6 +961,59 @@ class IntentRouter:
     _CODE_KEYWORDS = {"code", "function", "bug", "refactor", "debug", "syntax",
                       "compile", "exception", "traceback", "stack trace"}
 
+    #: Computer-use intent: phrases that ask to drive the desktop.
+    #:
+    #: **Phrases, never single words -- rewritten 10 October 2026.** This was a set of
+    #: `type`, `window`, `app`, `screen`, `copy`, `close`, `select`, `control`, `move`
+    #: and a dozen more, and it is checked ahead of vision, search and the rest, so
+    #: nearly any ordinary prompt ("what type of invoice", "copy edit this") was
+    #: classified as desktop control and given an `mcp.list_tools` step. Eleven
+    #: existing tests caught it. A verb that opens the prompt is the other half of
+    #: the signal -- "launch notepad", "press enter" -- and is `_DESKTOP_VERBS`.
+    _COMPUTER_USE_KEYWORDS = {
+        "click the", "click at", "click on", "double click", "double-click",
+        "right click", "right-click", "type text", "type into", "type in the",
+        "press enter", "press the key", "hotkey", "scroll down", "scroll up",
+        "scroll the", "drag the", "drag and drop", "screenshot the",
+        "take a screenshot", "list windows", "list apps", "list applications",
+        "get window state", "bring to front", "minimize the window",
+        "maximize the window", "resize the window", "move the window",
+        "focus the window", "launch the app", "control my computer",
+        "control the computer", "move the mouse", "move the cursor",
+    }
+
+    #: Verbs that, opening a prompt, are an instruction to the desktop: "launch
+    #: notepad", "type hello world". Anywhere else in a sentence they mean nothing
+    #: of the kind ("what type of..."), which is why they are anchored.
+    _DESKTOP_VERBS = ("type ", "click ", "press ", "scroll ", "drag ", "launch ", "bring ", "hotkey ")
+
+    #: Settings intent: phrases that ask to change Zaram's own configuration --
+    #: renderer, voice, routing, name and manner, a schedule. Phrases, for the reason
+    #: above: `name`, `local`, `use`, `tone`, `tool`, `allow`, `morning` and `auto`
+    #: are in half the prompts anyone writes.
+    _SETTINGS_KEYWORDS = {
+        "switch to avatar", "switch to the avatar", "switch to orb", "switch to the orb",
+        "change to orb", "change to avatar", "avatar renderer", "orb renderer",
+        "switch renderer", "show the orb", "show the avatar",
+        "set voice", "set the voice", "change voice", "change the voice",
+        "speak with voice", "disable voice", "enable voice", "disable speech", "enable speech",
+        "route to local", "route to cloud", "prefer local", "prefer cloud",
+        "local only", "cloud only", "change routing", "change the routing", "set routing",
+        "rename assistant", "rename the assistant", "call me ", "set manner",
+        "change manner", "set your manner", "write like", "sound more",
+        "schedule avatar", "schedule the avatar", "daily at", "weekly on",
+        "every morning", "every evening",
+        "every monday", "every tuesday", "every wednesday", "every thursday",
+        "every friday", "every saturday", "every sunday",
+    }
+
+    #: A grant or a revoke aimed at a tool: "grant click tool", "revoke permission
+    #: for click". The verb alone is not enough ("a grant proposal"), nor is the noun
+    #: ("what tool should I use").
+    _PERMISSION_PATTERN = re.compile(
+        r"\b(grant|revoke|allow|deny)\b.{0,40}\b(tool|tools|permission|permissions|cua-driver)\b"
+    )
+
     #: Compiled word-boundary matchers, keyed by the keyword set itself.
     #:
     #: Keyed by content, not by ``id()``. An id-keyed cache looked fine and was
@@ -903,7 +1107,13 @@ class IntentRouter:
         Embeddings first, keywords second. The semantic router returns None
         when it is not confident or not running semantically, which is a
         deliberate handback rather than a failure — see `core.retrieval.router`.
+
+        **It reads what the person typed, never the files attached to it** --
+        see `_asked`. Every entry point goes through here (the plan, the
+        model picker's `classify`, the search notice), so stripping once at the
+        door is what stops any one of them forgetting to.
         """
+        prompt = _asked(prompt)
         semantic = self._classify_semantically(prompt)
         if semantic is not None:
             return semantic
@@ -927,6 +1137,9 @@ class IntentRouter:
             search_wanted
             and web_search_enabled()
             and search_applies_to(_search_locality.get(), prompt)
+            # The same rule as the semantic path: a question about the open
+            # project is not a question for a search engine.
+            and not about_the_open_project(prompt)
         )
         if search_wanted and not search_required:
             # Also carried on the classification, because a debug line is not a
@@ -954,6 +1167,16 @@ class IntentRouter:
             weight=0.7,
             matched=image_matched,
             detail=f"Image-generation phrases found: {image_hits}",
+        ))
+
+        # Check for motion graphics keywords (before image to catch "animate this")
+        motion_hits = self._matches(prompt_lower, self._MOTION_KEYWORDS)
+        motion_matched = self._wants_motion(prompt)
+        signals.append(IntentSignal(
+            name="motion_phrases",
+            weight=0.7,
+            matched=motion_matched,
+            detail=f"Motion phrases found: {motion_hits}",
         ))
 
         # Check for vision keywords
@@ -1008,8 +1231,34 @@ class IntentRouter:
             detail=f"Coding keywords found: {code_hits}",
         ))
 
+        # Check for computer-use keywords (desktop automation)
+        cu_hits = self._matches(prompt_lower, self._COMPUTER_USE_KEYWORDS)
+        cu_matched = self._wants_computer_use(prompt)
+        signals.append(IntentSignal(
+            name="computer_use_keywords",
+            weight=0.5,
+            matched=cu_matched,
+            detail=f"Computer-use keywords found: {cu_hits}",
+        ))
+
+        # Check for settings keywords (internal configuration)
+        settings_hits = self._matches(prompt_lower, self._SETTINGS_KEYWORDS)
+        settings_matched = self._wants_settings(prompt)
+        signals.append(IntentSignal(
+            name="settings_keywords",
+            weight=0.6,
+            matched=settings_matched,
+            detail=f"Settings keywords found: {settings_hits}",
+        ))
+
         # Determine intent type based on signals
-        if image_matched:
+        if motion_matched:
+            # Checked first: "animate this" contains "this" which could match image,
+            # but motion is the more specific intent.
+            intent_type = IntentType.MOTION
+            confidence = 0.85
+            capabilities = ["motion.generate"]
+        elif image_matched:
             # Ahead of vision deliberately: "draw me a picture" matches both,
             # and only one of the two readings is what anybody meant.
             intent_type = IntentType.IMAGE
@@ -1021,6 +1270,20 @@ class IntentRouter:
             intent_type = IntentType.CODE
             confidence = 0.75
             capabilities = ["reasoning.generate"]
+        elif settings_matched:
+            # Settings phrases override everything — they are a modality gate
+            # (can this model change Zaram's config?), not a similarity judgement.
+            # Same precedence logic as image generation / computer use.
+            intent_type = IntentType.SETTINGS
+            confidence = 0.85
+            capabilities = _TOOL_CAPABILITIES
+        elif cu_matched:
+            # Computer-use phrases override vision/filesystem — they are a
+            # modality gate (can this model control the desktop?), not a
+            # similarity judgement. Same precedence logic as image generation.
+            intent_type = IntentType.COMPUTER_USE
+            confidence = 0.80
+            capabilities = _TOOL_CAPABILITIES
         elif vision_matched:
             intent_type = IntentType.VISION
             confidence = 0.85
@@ -1070,7 +1333,10 @@ class IntentRouter:
             # for a reason nobody asked for.
             requires_vision=vision_matched and not image_matched,
             requires_image_output=image_matched,
+            requires_motion=motion_matched,
             requires_speech=speech_matched,
+            requires_computer_use=cu_matched,
+            requires_settings=settings_matched,
             search_suppressed=search_wanted and not search_required,
             search_suppressed_reason=suppression_reason(search_wanted, search_required),
             metadata={
@@ -1098,6 +1364,12 @@ class IntentRouter:
         #: Same capability again; what differs is the instruction — see
         #: `_translation_prompt`.
         "translate": ["reasoning.generate"],
+        #: Computer-use actions via MCP (cua-driver). Same capabilities as TOOL.
+        "computer_use": ["mcp.list_tools", "reasoning.generate"],
+        #: Settings changes via zaram-self MCP server. Same capabilities as TOOL.
+        "settings": ["mcp.list_tools", "reasoning.generate"],
+        #: Motion graphics generation — produces video via Code-to-Frame pipeline.
+        "motion": ["motion.generate"],
     }
 
     def _classify_semantically(self, prompt: str) -> IntentClassification | None:
@@ -1179,6 +1451,18 @@ class IntentRouter:
             overridden_from = decision.intent
             intent_type = IntentType.CODE
             capabilities = list(self._SEMANTIC_CAPABILITIES["code"])
+        # Computer-use phrases override the router — similar to image generation,
+        # computer-use is a precondition (modality gate), not a similarity judgement.
+        elif self._wants_computer_use(prompt) and decision.intent != "computer_use":
+            overridden_from = decision.intent
+            intent_type = IntentType.COMPUTER_USE
+            capabilities = list(self._SEMANTIC_CAPABILITIES["computer_use"])
+        # Settings phrases override the router — same logic: modality gate
+        # (can this model change Zaram's config?), not a similarity judgement.
+        elif self._wants_settings(prompt) and decision.intent != "settings":
+            overridden_from = decision.intent
+            intent_type = IntentType.SETTINGS
+            capabilities = list(self._SEMANTIC_CAPABILITIES["settings"])
 
         # **Wanting live information is a property of the question, not a rival
         # intent.** This read `decision.intent == "search"` alone, and because
@@ -1209,6 +1493,14 @@ class IntentRouter:
             wants_search
             and web_search_enabled()
             and search_applies_to(_search_locality.get(), prompt)
+            # **A question about the project that is open is not a question for
+            # a search engine.** Reported 12 October 2026: "What are the
+            # unfinished tasks in Ride Share?", asked with Ride Share open, went
+            # to the web and came back with the Zeigarnik effect. The person
+            # chose the project; naming it, or saying "this project", points
+            # there. Asking for the web in words still gets the web -- see
+            # `core/open_project.py`.
+            and not about_the_open_project(prompt)
         )
         if decision.intent == "search" and not requires_search:
             capabilities = ["reasoning.generate"]
@@ -1235,6 +1527,7 @@ class IntentRouter:
             requires_vision=intent_type is IntentType.VISION,
             requires_image_output=intent_type is IntentType.IMAGE,
             requires_speech=decision.intent == "speech",
+            requires_computer_use=intent_type is IntentType.COMPUTER_USE,
             search_suppressed=wants_search and not requires_search,
             search_suppressed_reason=suppression_reason(wants_search, requires_search),
             metadata={
@@ -1391,8 +1684,72 @@ class IntentPlanner:
         is one the keywords invented, and `Dispatcher` refuses it rather than
         letting it fall through to generation — a model asked to describe a
         picture nobody supplied writes a confident description of nothing.
+
+        **Two texts, kept apart: what was asked, and what the model reads.**
+        ``prompt`` is the composed message -- the attachment block, then the
+        person's words. *What kind of turn this is* is decided from the words
+        alone (`_asked`): the block is third-party text and must not choose
+        the plan (measured 11 October 2026, a screenshot's "Select / Preview /
+        Save" made a page request a tool turn). *What the model reads* is the
+        whole prompt, or it would never see the file. So each step below takes
+        one or the other, and the comment on it says which and why. The rule of
+        thumb: anything that is sent **to a place** (a search engine, a tool
+        ranker) or **decides a kind** (document brief, page address, drawing)
+        gets the words; anything the model **answers from** gets the whole.
         """
-        classification = self._router.classify(prompt)
+        asked = _asked(prompt)
+        # The block alone, for the one step that is built from the words but
+        # must still put the file in front of the model.
+        attached = _attached_text(prompt, asked)
+        classification = self._router.classify(asked)
+        # **A page whose pictures are part of it is a page, not a drawing.**
+        # Reported 12 October 2026: "Build a luxury resort website ... source
+        # the internet for images you need" classified as IMAGE and Zaram began
+        # drawing a picture instead of building the site -- and "find photos
+        # online for it" classified as a file search. The pictures in a site
+        # are found by the photo pack (`packs/photos`) while the page is
+        # written, so for such a request the page is the whole job.
+        #
+        # **And pictures asked for *from the web* are never drawn**, whatever
+        # is being made -- the maintainer's rule, the same day: "source images",
+        # "get photos online". A page or an app takes them as `photo:`
+        # references; a document takes them as markdown images the documents
+        # runtime resolves (`core/sourced_pictures.py`); a request for neither
+        # is at least not sent to a drawing model.
+        sourcing = asks_to_source_pictures(asked)
+        if not has_images and (
+            (
+                classification.intent_type in (IntentType.IMAGE, IntentType.FILESYSTEM)
+                and _a_page_with_pictures_in_it(asked)
+            )
+            or (
+                sourcing
+                and classification.intent_type
+                in (IntentType.IMAGE, IntentType.FILESYSTEM, IntentType.VISION)
+            )
+            # Measured on bge-m3 the same day: "Write a brochure document about
+            # Lagos tourism, source images online" routed as neither a document
+            # nor a drawing, so it would have been a chat reply with nowhere for
+            # the photos to go. Asking for web photos *and* naming a document is
+            # a request for that document.
+            or (
+                sourcing
+                and classification.intent_type in (IntentType.CONVERSATION, IntentType.SEARCH)
+                and _names_a_document(asked)
+                and not _builds_a_page(asked)
+            )
+        ):
+            a_document = _names_a_document(asked) and not _builds_a_page(asked)
+            classification = replace(
+                classification,
+                intent_type=IntentType.DOCUMENT if a_document else IntentType.CONVERSATION,
+                capabilities=(
+                    ["reasoning.generate", "document.generate"] if a_document else ["reasoning.generate"]
+                ),
+                requires_image_output=False,
+                requires_vision=False,
+                requires_search=False,
+            )
         logger.debug("IntentPlanner: classified as %s (confidence=%.2f)", classification.intent_type, classification.confidence)
 
         plan_steps: list[ExecutionStep] = []
@@ -1431,16 +1788,31 @@ class IntentPlanner:
             # coding project open the listing is not added at all.
             body = ExecutionStep(
                 capability_id="reasoning.generate",
-                input_data={"prompt": _document_body_prompt(prompt)},
+                # The file in front, the instruction after it. The instruction
+                # is built from the person's words because it picks the brief
+                # by looking for "proposal", "invoice", "memo" in them -- built
+                # from the whole prompt, an attached invoice would turn "write
+                # a memo about this" into an invoice brief. The block is still
+                # in the prompt, so the document is written from the file.
+                # And, when the person asked for photos from the web, how to
+                # name them so the documents runtime can find them.
+                input_data={
+                    "prompt": attached
+                    + _document_body_prompt(asked)
+                    + (document_photo_guidance() if sourcing else "")
+                },
                 depends_on=[],
             )
             document = ExecutionStep(
                 # The *user's* words, not the rewritten instruction: the
                 # runtime reads them to decide whether "spreadsheet" or
                 # "invoice" was asked for, and the instruction below would
-                # match none of them.
+                # match none of them. And not the attachment either: the
+                # runtime also tests them for "this" and "that" (rule 9's
+                # refusal), which any attached text contains, and the body
+                # step above already carries the file.
                 capability_id="document.generate",
-                input_data={"prompt": prompt, "answer": ""},
+                input_data={"prompt": asked, "answer": ""},
                 depends_on=[0],
             )
             if self._coding_project_is_open():
@@ -1449,7 +1821,11 @@ class IntentPlanner:
                 plan_steps = [
                     ExecutionStep(
                         capability_id="mcp.list_tools",
-                        input_data={"query": prompt},
+                        # Ranks a stranger's tools against the question, so it
+                        # is the question: a listing query is matched against
+                        # third-party tool descriptions, and an attached file
+                        # is not a description of what tool is wanted.
+                        input_data={"query": asked},
                         depends_on=[],
                     ),
                     body,
@@ -1458,7 +1834,9 @@ class IntentPlanner:
             else:
                 plan_steps = [body, document]
         elif (
-            _names_a_page(prompt)
+            # An address the person wrote, not one inside an attached file: a
+            # contract that mentions a website is not a request to open it.
+            _names_a_page(asked)
             and not has_images
             and classification.intent_type not in (IntentType.IMAGE, IntentType.DOCUMENT, IntentType.SPEECH)
         ):
@@ -1471,11 +1849,13 @@ class IntentPlanner:
             plan_steps = [
                 ExecutionStep(
                     capability_id="mcp.list_tools",
-                    input_data={"query": prompt},
+                    # The words: it ranks tools, and see the document branch.
+                    input_data={"query": asked},
                     depends_on=[],
                 ),
                 ExecutionStep(
                     capability_id="reasoning.generate",
+                    # The whole prompt: the model answers from the file.
                     input_data={"prompt": prompt},
                     depends_on=[0],
                 ),
@@ -1484,7 +1864,12 @@ class IntentPlanner:
             plan_steps = [
                 ExecutionStep(
                     capability_id="knowledge.search",
-                    input_data={"query": prompt, "persona": "zaram_prime"},
+                    # **The person's words and never the attachment.** This
+                    # string leaves the machine for a search engine (rule 3
+                    # logs it, rule 5 gates it), and a document's text sent
+                    # there as a query would be the user's file leaving by the
+                    # side door -- the very thing rule 7c refuses for parsing.
+                    input_data={"query": asked, "persona": "zaram_prime"},
                     depends_on=[],
                 ),
                 ExecutionStep(
@@ -1495,10 +1880,29 @@ class IntentPlanner:
             ]
         elif (
             classification.intent_type is IntentType.TOOL
+            # **A desktop request is a tool request.** "Click on the Start button" and
+            # "take a screenshot" classified as COMPUTER_USE, and nothing read that:
+            # this arm tested TOOL only, so they fell through to a plain reply and the
+            # model could describe a click but never had the tools to make one --
+            # cua-driver could be installed, connected and healthy and still never be
+            # offered. Found 10 October 2026 when the maintainer asked how to trigger it.
+            or classification.intent_type is IntentType.COMPUTER_USE
             or (
                 self._coding_project_is_open()
                 and classification.intent_type
                 in (IntentType.CODE, IntentType.CONVERSATION, IntentType.FILESYSTEM)
+                and not has_images
+            )
+            # **And a question that reads as a search, when it is about the open
+            # repository.** The router no longer asks for the web for it (see
+            # `requires_search` in `classify`), and without this it would fall
+            # to a bare reply that knows the folder's path and nothing in it --
+            # which is the answer that was reported: "check the project files
+            # in your C:\RideShare repository".
+            or (
+                self._coding_project_is_open()
+                and classification.intent_type in (IntentType.SEARCH, IntentType.MULTI_STEP)
+                and about_the_open_project(asked)
                 and not has_images
             )
             # **Vision with nothing attached, whatever is open.** The comment
@@ -1518,7 +1922,7 @@ class IntentPlanner:
             # dropped. One request gets one intent, so the fix is to stop
             # calling this one an image: with `draw_image` in the tool list the
             # drawing is a *step*, which is what the person asked for.
-            or (not has_images and IntentRouter._asks_for_work_with_a_picture_in_it(prompt))
+            or (not has_images and IntentRouter._asks_for_work_with_a_picture_in_it(asked))
         ):
             # Same shape as the search pair above: gather, then answer with
             # what was gathered. The list step is what puts the user's attached
@@ -1549,7 +1953,7 @@ class IntentPlanner:
             plan_steps = [
                 ExecutionStep(
                     capability_id="mcp.list_tools",
-                    input_data={"query": prompt},
+                    input_data={"query": asked},
                     depends_on=[],
                 ),
                 ExecutionStep(
@@ -1563,6 +1967,10 @@ class IntentPlanner:
             # translation *of a picture's text* keeps the generic path: the
             # picture has to reach the model, and the instruction assumes
             # text it can already see.
+            #
+            # Built from the whole prompt on purpose: the text to translate
+            # may be the attached file, and the instruction does no keyword
+            # work on it -- it only quotes the request for the model.
             plan_steps = [
                 ExecutionStep(
                     capability_id="reasoning.generate",
@@ -1611,7 +2019,8 @@ class IntentPlanner:
             plan_steps = [
                 ExecutionStep(
                     capability_id="knowledge.search",
-                    input_data={"query": prompt, "persona": "zaram_prime"},
+                    # The words, never an attached file; see `create_plan`.
+                    input_data={"query": _asked(prompt), "persona": "zaram_prime"},
                     depends_on=[],
                 ),
                 ExecutionStep(

@@ -78,6 +78,7 @@ export interface BrowserTab {
   canGoBack?: boolean;
   canGoForward?: boolean;
   loading?: boolean;
+  error?: string;
 }
 
 /** What main pushes when a tab navigates, loads, or is refused. */
@@ -99,4 +100,6 @@ export interface BrowserDecision {
   /** `empty`, `not-an-address`, `scheme`, `browse-not-allowed`, `no-such-tab`. */
   reason?: string;
   typed?: string;
+  loaded?: boolean;
+  error?: string;
 }

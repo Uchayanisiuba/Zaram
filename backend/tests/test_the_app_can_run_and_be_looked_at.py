@@ -101,8 +101,14 @@ class TestTheManagedProcess:
         status = code.call_tool(APP_STATUS, {})
         assert status["running"] is True and status["url"].endswith(f":{port}/")
 
-        log = code.call_tool(READ_APP_LOG, {"lines": 5})
-        assert any("Local:" in line for line in log["lines"])
+        # The app writes its banner on its own thread; read until it arrives
+        # rather than racing it (the start returns as soon as the port answers).
+        deadline = time.monotonic() + 5
+        log = code.call_tool(READ_APP_LOG, {"lines": 60})
+        while not any("Local:" in line for line in log["lines"]) and time.monotonic() < deadline:
+            time.sleep(0.1)
+            log = code.call_tool(READ_APP_LOG, {"lines": 60})
+        assert any("Local:" in line for line in log["lines"]), log
 
         again = code.call_tool(START_APP, {"runner": "npm:dev"})
         assert "already running" in again["error"]

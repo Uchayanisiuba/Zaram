@@ -49,6 +49,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
+import { BAR_CHIP } from '@/components/chat/barChip';
 
 import { useChatStore } from '@/stores/chatStore';
 
@@ -240,7 +241,7 @@ export default function ProjectScopePicker() {
   }
 
   return (
-    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+    <div className={BAR_CHIP}>
       <FolderOpen size={12} aria-hidden className="shrink-0" />
       <label htmlFor="project-scope" className="sr-only">
         Project this conversation belongs to

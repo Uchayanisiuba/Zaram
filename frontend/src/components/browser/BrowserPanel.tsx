@@ -24,7 +24,7 @@
  * bridge and no view. The pane says so rather than rendering chrome around
  * a hole that will never be filled.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
@@ -35,9 +35,13 @@ import {
   Minimize2,
   RotateCw,
   X,
+  ExternalLink,
 } from 'lucide-react';
 
 import NewTabPage from './NewTabPage';
+import { useContextMenu } from '@/hooks/useContextMenu';
+import ContextMenu from '@/components/design-system/ContextMenu';
+import { isWebAddress, openInBrowser } from '@/lib/openInBrowser';
 
 type Tab = NonNullable<Window['zaram']> extends { browser?: infer B }
   ? B extends { state(): Promise<{ tabs: infer T }> }
@@ -86,8 +90,11 @@ export default function BrowserPanel({ initialUrl, onClose }: Props = {}) {
   // about the thing on screen now, not a preference about browsing.
   const [maximised, setMaximised] = useState(false);
 
+  // Context menu for tabs and address bar
+  const contextMenu = useContextMenu();
+
   const active = tabs.find((t) => (t as { id: string }).id === activeId) as
-    | { id: string; url: string; title: string; canGoBack?: boolean; canGoForward?: boolean; loading?: boolean }
+    | { id: string; url: string; title: string; canGoBack?: boolean; canGoForward?: boolean; loading?: boolean; error?: string }
     | undefined;
   // A tab with no URL is showing the new-tab page, which is React and would
   // be covered by the view.
@@ -173,8 +180,13 @@ export default function BrowserPanel({ initialUrl, onClose }: Props = {}) {
   const go = useCallback(
     async (url: string) => {
       if (!bridge || !activeId) return;
-      const decision = await bridge.navigate(activeId, url);
-      setRefusal(decision && !decision.allow ? refusalText(decision.reason, url) : '');
+      try {
+        const decision = await bridge.navigate(activeId, url);
+        setRefusal(!decision ? 'The browser is not available.' : decision.error ||
+          (!decision.allow ? refusalText(decision.reason, url) : ''));
+      } catch (error) {
+        setRefusal(`The page could not be opened: ${error instanceof Error ? error.message : String(error)}`);
+      }
     },
     [bridge, activeId],
   );
@@ -254,12 +266,23 @@ export default function BrowserPanel({ initialUrl, onClose }: Props = {}) {
         {tabs.map((raw) => {
           const tab = raw as { id: string; title: string; url: string };
           const isActive = tab.id === activeId;
+          const handleTabContextMenu = (event: MouseEvent<HTMLDivElement>) => {
+            if (!tab.url || !isWebAddress(tab.url)) return;
+            contextMenu.open(event, [
+              {
+                label: 'Open in system browser',
+                icon: <ExternalLink size={14} />,
+                onClick: () => openInBrowser(tab.url!),
+              },
+            ]);
+          };
           return (
             <div
               key={tab.id}
               className={`group flex max-w-[180px] items-center gap-2 rounded-t-md px-3 py-1.5 text-xs ${
                 isActive ? 'bg-slate-900 text-slate-100' : 'text-slate-500 hover:bg-slate-900/50'
               }`}
+              onContextMenu={handleTabContextMenu}
             >
               <button
                 type="button"
@@ -332,6 +355,16 @@ export default function BrowserPanel({ initialUrl, onClose }: Props = {}) {
             data-testid="address-bar"
             value={typed}
             onChange={(event) => setTyped(event.target.value)}
+            onContextMenu={(event) => {
+              if (!typed || !isWebAddress(typed)) return;
+              contextMenu.openAt(event, [
+                {
+                  label: 'Open in system browser',
+                  icon: <ExternalLink size={14} />,
+                  onClick: () => openInBrowser(typed),
+                },
+              ]);
+            }}
             placeholder="Type a URL"
             spellCheck={false}
             className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500"
@@ -363,12 +396,15 @@ export default function BrowserPanel({ initialUrl, onClose }: Props = {}) {
         )}
       </div>
 
-      {refusal && (
+      {(refusal || active?.error) && (
         <p
           data-testid="browser-refusal"
           className="border-b border-amber-900/40 bg-amber-950/30 px-4 py-2 text-xs text-amber-200"
         >
-          {refusal}
+          {refusal || active?.error}
+          <button type="button" className="ml-3 underline" onClick={() => void go(active?.url || typed)}>
+            Retry
+          </button>
         </p>
       )}
 
@@ -379,5 +415,14 @@ export default function BrowserPanel({ initialUrl, onClose }: Props = {}) {
       </motion.div>
     </motion.div>,
     document.body,
+  );
+
+  // Render context menu at portal root
+  return (
+    <>
+      {contextMenu.state.visible && (
+        <ContextMenu state={contextMenu.state} close={contextMenu.close} />
+      )}
+    </>
   );
 }

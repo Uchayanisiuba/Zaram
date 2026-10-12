@@ -32,6 +32,8 @@
  */
 
 import { bundleApp, extractAppFiles, type AppFile } from './appFiles';
+import { inlinePictures } from './pagePictures';
+import type { PhotoMap } from './pagePhotos';
 
 /** For a generated **document** — an invoice, a report, a CV.
  *
@@ -592,6 +594,16 @@ export interface PreviewableBlock {
   /** Whether the joined page loads modules from `data:` URLs, so its policy
    *  has to allow them. */
   modules?: boolean;
+  /** Pictures the person attached, by the name the page uses for them: the
+   *  picture as a `data:` URI, or `null` when its bytes are gone. `code` and
+   *  `files` keep the names; `inlinePictures` puts the pictures in for the copy
+   *  that is run, checked or saved. `lib/pagePictures.ts`. */
+  pictures?: Record<string, string | null>;
+  /** Photographs found online for the page's `photo:` descriptions, by
+   *  `photoKey`; put in with the pictures above. `lib/pagePhotos.ts`. */
+  photos?: PhotoMap;
+  /** How many `photo:` descriptions the page uses, found or not. */
+  photoRefs?: number;
 }
 
 /**
@@ -678,7 +690,10 @@ export function filenameFor(block: PreviewableBlock): string {
  *  because the file exists only as a string in this tab. The revoke is
  *  deferred for the same measured reason it is there — Chrome cancels a
  *  download whose object URL is released before it has finished reading it. */
-export function savePreviewable(block: PreviewableBlock): Promise<string | null> {
+export function savePreviewable(shown: PreviewableBlock): Promise<string | null> {
+  // The file keeps the person's pictures: the names the model wrote are
+  // replaced by the pictures themselves, so one saved file is whole.
+  const block = inlinePictures(shown);
   // An app of several files is a folder, and a browser download is one file.
   // It is written to Zaram's output directory instead -- new files only, no
   // project -- and the folder is named back to the person.
@@ -702,7 +717,10 @@ export function savePreviewable(block: PreviewableBlock): Promise<string | null>
 /** Keep an app of several files as a new folder, and return where. Throws with
  *  the backend's own reason when it refuses, so the person reads what was wrong
  *  rather than that something was. */
-export async function saveAppFolder(block: PreviewableBlock): Promise<string> {
+export async function saveAppFolder(shown: PreviewableBlock): Promise<string> {
+  // `/apps/save` takes text files only, so the person's pictures go into the
+  // files as `data:` URIs rather than being written beside them.
+  const block = inlinePictures(shown);
   const titled = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(block.code);
   const response = await fetch(`${import.meta.env.VITE_ZARAM_API ?? ''}/apps/save`, {
     method: 'POST',

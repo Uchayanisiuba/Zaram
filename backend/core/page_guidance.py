@@ -42,8 +42,16 @@ When the answer is a page that runs in the browser:
 - Zaram previews it with no network. three.js and these addons are served offline: controls/PointerLockControls, controls/OrbitControls, controls/FirstPersonControls, math/ImprovedNoise, math/SimplexNoise. Load them with an import map, which also works when the saved file is opened online:
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three/examples/jsm/"}}</script>
   then `import * as THREE from 'three'` and `import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js'` in a <script type="module">. Do not use build/three.min.js; it no longer exists. Any other library will not load in the preview.
-- A start screen that covers the page takes the click itself: put the listener on the start screen (or the document), start the game and hide the screen in that handler. Request pointer lock from that click, and show the screen again when the lock is released.
-- When asked to change a page you already wrote, reply with the whole updated page in one ```html block, never only the changed lines: the person runs the page, and a fragment cannot be run. For an app of several files, write every file again in full with its name.
+- A start screen that covers the page takes the click itself: put the listener on the start screen (or the document), start the game and hide the screen in that handler. Request pointer lock from that click, but never wait for it: start playing in the click handler whether or not the lock is granted (some windows refuse it), and let the mouse look by dragging when there is no lock. Show the screen again when a lock that was granted is released.
+- First-person movement: build the forward vector from the camera's yaw, flat on the ground, and the right vector at 90 degrees to it. W adds forward, S subtracts it, D adds right, A subtracts it. Start the wish vector at zero each frame so nothing moves without a key, and clear `onGround` before the vertical move each frame so it is set only by landing.
+- When asked to change a page you already wrote, reply with only what changes, as SEARCH/REPLACE blocks against the page as it stands. Zaram applies them and runs the result, so the person still gets the whole page. Name the file on the line above each block when the page has several files:
+  game.js
+  <<<<<<< SEARCH
+  lines copied exactly from the current page
+  =======
+  the lines that replace them
+  >>>>>>> REPLACE
+  Copy each SEARCH part character for character, keep each block small, and use as many blocks as you need. Write the whole page again only when most of it changes.
 - Before finishing, re-read every loop: each `for` must change its counter (`i++`), and nothing may run unbounded at start-up. A loop that never ends freezes the whole page before it draws anything.
 - Draw the first screen (menu, title, "Loading…") before any heavy work, then do the work in small pieces across frames — a few chunks of a world per `requestAnimationFrame` or `setTimeout`, with a progress line — never as one loop that holds the page still for seconds. A page that is blank for ten seconds reads as broken.
 - A game waits for the player. Draw the board and a line such as "Press an arrow key to start", and do not move anything until the first key press or click: the person is still looking at the screen, and a snake that sets off at once has hit the wall before they can steer. Game over then waits for a key to restart.
@@ -51,6 +59,61 @@ When the answer is a page that runs in the browser:
 - Never advance a game by the time since the page loaded. Take the first `requestAnimationFrame` timestamp as the starting time, clamp each frame's elapsed time (for example to 100 ms), and make at most one move per frame; a catch-up loop that replays every missed step makes a stalled or slow first frame play a whole round before anything is drawn.
 - Keep a moving body out of solid ground: clamp each frame's time step, split a fast move into steps smaller than one block, and start the player standing on the surface rather than in the air above it.
 """
+
+
+#: A request to *make* a page, not merely one that mentions a browser: a
+#: building verb, then within a few words something that runs in one. Narrow on
+#: purpose -- it decides that a turn is offered no tools, and "open google in
+#: my browser" (computer use) or "read this website" (the web tool) must keep
+#: theirs. See `ExecutionEngine._writes_a_page_in_the_chat`.
+_BUILD_A_PAGE = re.compile(
+    r"\b(build|make|create|write|code|generate|design|develop|program|rewrite|remake|recreate)\b"
+    r"(?:\W+\w+){0,6}?\W+"
+    r"(html|web ?page|website|web ?site|landing page|web ?app|app|browser game|game|three\.?js|webgl|"
+    r"canvas|minecraft|platformer|shooter|snake|tetris|pong|page)\b",
+    re.IGNORECASE,
+)
+
+#: A game tied to a browser or to HTML is a page whatever the verb -- people
+#: type fast ("Creaye a Mine craft game ... run of my browser").
+_A_BROWSER_GAME = re.compile(
+    r"\b(?:html|browser|web|three\.?js|webgl)\b(?:\W+\w+){0,4}?\W+games?\b"
+    r"|\bgames?\b(?:\W+\w+){0,12}?\W+(?:html|browser|web ?page|three\.?js|webgl)\b",
+    re.IGNORECASE,
+)
+
+_DOING_SOMETHING_ELSE = re.compile(
+    r"\b(open|launch|start|run it|play|close|search|look up|find|browse|download|install|show me|review|reviews)\b",
+    re.IGNORECASE,
+)
+
+#: The openings of Zaram's own messages about a page it wrote: a revision of a
+#: reply (`core/revise.py`), the check's fix request and the preview's.
+_ABOUT_A_WRITTEN_PAGE = (
+    "Zaram ran this page before showing it",
+    "The page stopped with this error",
+    "Change one part of the page",
+)
+
+
+def asks_to_build_a_page(text: str) -> bool:
+    """Whether ``text`` asks for a page to be written or rewritten in the reply.
+
+    True for "build a Minecraft-style game in HTML" and for Zaram's own
+    fix and change requests about a page; false for "open google in my
+    browser", "what's on this website" or "who won the game".
+    """
+    text = text or ""
+    if text.startswith("The person is revising an earlier answer"):
+        return "```html" in text.lower() or any(opening in text for opening in _ABOUT_A_WRITTEN_PAGE)
+    if any(text.startswith(opening) for opening in _ABOUT_A_WRITTEN_PAGE):
+        return True
+    if _BUILD_A_PAGE.search(text):
+        return True
+    # Without a building verb, a game in a browser is only a page to write
+    # when nothing else is being asked of it: "open the game in my browser" is
+    # computer use, "search the web for game reviews" is search.
+    return bool(_A_BROWSER_GAME.search(text)) and not _DOING_SOMETHING_ELSE.search(text)
 
 
 def wants_page_guidance(text: str, last_answer: str = "") -> bool:

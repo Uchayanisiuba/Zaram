@@ -27,7 +27,7 @@ format → format.
 from __future__ import annotations
 
 import html as html_escape
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, Mapping, Optional, Sequence
 
 from .contracts import (
     ArtifactSource,
@@ -138,6 +138,26 @@ def _image_block(block: ImageBlock) -> str:
     encoded = base64.b64encode(block.data).decode("ascii")
     return (
         f'<img alt="{_esc(block.alt)}" '
+        f'src="data:{_esc(block.media_type)};base64,{encoded}">'
+    )
+
+
+def _mark_image(block: ImageBlock, css_class: str) -> str:
+    """A picture the document is *about* rather than one inside its prose.
+
+    A logo, a CV photo, a slide's picture: each is placed by a field and carries
+    a class so the exporters know where it belongs (`_reader.Image.role`) --
+    the letterhead's logo has always been marked this way. Embedded as a
+    `data:` URI for the reason `_image_block` gives, and empty when the bytes
+    are, rather than a broken-image box.
+    """
+    import base64
+
+    if not block.data:
+        return ""
+    encoded = base64.b64encode(block.data).decode("ascii")
+    return (
+        f'<img class="{_esc(css_class)}" alt="{_esc(block.alt)}" '
         f'src="data:{_esc(block.media_type)};base64,{encoded}">'
     )
 
@@ -410,6 +430,10 @@ def render_deck(
     sources: Sequence[ArtifactSource] = (),
     claims: Sequence[Claim] = (),
     include_provenance: bool = True,
+    #: Slide index -> the picture that goes on that slide. It sits between the
+    #: slide's heading and its bullets, which is where the .pptx exporter reads
+    #: it back from.
+    slide_images: "Mapping[int, ImageBlock] | None" = None,
 ) -> str:
     """A deck, as an outline. **The HTML is the same shape any document has.**
 
@@ -424,8 +448,11 @@ def render_deck(
     a client's page.
     """
     body: List[str] = []
-    for heading, bullets in slides:
+    for index, (heading, bullets) in enumerate(slides):
         body.append(f"<h2>{_esc(heading)}</h2>")
+        picture = (slide_images or {}).get(index)
+        if picture is not None:
+            body.append(_mark_image(picture, "slide-image"))
         items = "".join(
             f"<li>{claim_span(b) if isinstance(b, Claim) else _esc(b)}</li>"
             for b in bullets
@@ -439,7 +466,7 @@ def render_deck(
             "<!DOCTYPE html>",
             '<html lang="en"><head><meta charset="utf-8">',
             f"<title>{_esc(title)}</title>",
-            f"<style>{_STYLE}</style>",
+            f"<style>{_STYLE}{_DECK_STYLE}</style>",
             "</head><body>",
             '<div class="sheet">',
             _masthead(title, letterhead, "Deck"),
@@ -1014,7 +1041,17 @@ _EMPHASIS_STYLE = (
     "border-bottom:2px solid var(--accent);break-after:avoid;page-break-after:avoid}"
 )
 
+#: A slide's picture, in the outline. Bounded in height so one photograph does
+#: not push the slide's own bullets off the page; the .pptx puts it beside them.
+_DECK_STYLE = ".slide-image{max-height:80mm;max-width:100%;width:auto;height:auto;margin:.4em 0 .8em}"
+
 _CV_STYLE = (
+    # The photo sits opposite the name block. Only emitted when a photo was
+    # placed, so a CV without one has exactly the markup it always had.
+    ".cv-head{display:flex;justify-content:space-between;align-items:flex-start;"
+    "gap:20px;border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:22px}"
+    ".cv-head .cv-contact{border-bottom:0;margin-bottom:0;padding-bottom:0}"
+    ".cv-head .photo{width:32mm;height:40mm;object-fit:cover;margin:0;flex:none}"
     # The name carries the page. No rule under it: a heavy border under a
     # person's name is a letterhead, and a CV is not correspondence.
     ".cv-name{font:600 26pt/1.15 " + _SERIF + ";color:var(--ink);margin:0 0 2px}"
@@ -1077,6 +1114,8 @@ def render_cv(
     sources: Sequence[ArtifactSource] = (),
     claims: Sequence[Claim] = (),
     include_provenance: bool = False,
+    #: The person's photograph, opposite their name. Optional.
+    photo: "ImageBlock | None" = None,
 ) -> str:
     """A CV, in the layout a CV is read in.
 
@@ -1094,12 +1133,17 @@ def render_cv(
     empty — a CV with a bare "Education" heading and nothing under it says
     something about the person that is not true.
     """
-    body: List[str] = [f'<h1 class="cv-name">{_esc(name)}</h1>']
+    head: List[str] = [f'<h1 class="cv-name">{_esc(name)}</h1>']
     if headline:
-        body.append(f'<p class="cv-headline">{_esc(headline)}</p>')
+        head.append(f'<p class="cv-headline">{_esc(headline)}</p>')
     if contact:
         spans = "".join(f"<span>{_esc(item)}</span>" for item in contact if item)
-        body.append(f'<p class="cv-contact">{spans}</p>')
+        head.append(f'<p class="cv-contact">{spans}</p>')
+    mark = _mark_image(photo, "photo") if photo is not None else ""
+    if mark:
+        body: List[str] = [f'<div class="cv-head"><div>{"".join(head)}</div>{mark}</div>']
+    else:
+        body = head
     if summary:
         body.append(f'<p class="cv-summary">{_text(summary)}</p>')
 

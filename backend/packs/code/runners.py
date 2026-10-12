@@ -133,6 +133,9 @@ class Runner:
     #: `node_modules` — worse than the wait it avoided. ``None`` means
     #: `TIMEOUT_SECONDS`.
     timeout: Optional[int] = None
+    #: Logical group for stack operations (e.g., "frontend", "backend", "worker").
+    #: Used by `start_app_stack` to auto-group runners.
+    group: Optional[str] = None
 
     def to_json(self) -> Dict[str, Any]:
         return {
@@ -140,6 +143,7 @@ class Runner:
             "command": " ".join(self.argv),
             "description": self.description,
             "check": self.check,
+            "group": self.group,
         }
 
 
@@ -408,11 +412,211 @@ def check_runner(root: Path) -> Optional[Runner]:
 _CHECK_ORDER = {"typecheck": 0, "tsc": 0, "lint": 1, "ruff": 1, "check": 2, "build": 3}
 
 
+def _assign_group(runner: Runner) -> Runner:
+    """Assign a logical group to a runner based on its name and command."""
+    name = runner.name.lower()
+    cmd = " ".join(runner.argv).lower()
+    
+    # Frontend patterns
+    if any(pattern in name for pattern in ("frontend", "web:", "vite", "next:", "react:", "svelte:", "astro:", "nuxt:", "remix:")):
+        return Runner(
+            name=runner.name, argv=runner.argv, description=runner.description,
+            flags=runner.flags, check=runner.check, timeout=runner.timeout, group="frontend"
+        )
+    if any(pattern in cmd for pattern in ("vite", "next dev", "react-scripts start", "webpack serve")):
+        return Runner(
+            name=runner.name, argv=runner.argv, description=runner.description,
+            flags=runner.flags, check=runner.check, timeout=runner.timeout, group="frontend"
+        )
+    
+    # Backend patterns
+    if any(pattern in name for pattern in ("backend", "api:", "server:", "django:", "flask:", "fastapi:", "express:", "rails:", "phoenix:")):
+        return Runner(
+            name=runner.name, argv=runner.argv, description=runner.description,
+            flags=runner.flags, check=runner.check, timeout=runner.timeout, group="backend"
+        )
+    if any(pattern in cmd for pattern in ("manage.py runserver", "uvicorn", "gunicorn", "rails server", "mix phx.server")):
+        return Runner(
+            name=runner.name, argv=runner.argv, description=runner.description,
+            flags=runner.flags, check=runner.check, timeout=runner.timeout, group="backend"
+        )
+    
+    # Worker patterns
+    if any(pattern in name for pattern in ("worker", "queue:", "celery:", "sidekiq:")):
+        return Runner(
+            name=runner.name, argv=runner.argv, description=runner.description,
+            flags=runner.flags, check=runner.check, timeout=runner.timeout, group="worker"
+        )
+    if any(pattern in cmd for pattern in ("celery worker", "sidekiq", "queue:work")):
+        return Runner(
+            name=runner.name, argv=runner.argv, description=runner.description,
+            flags=runner.flags, check=runner.check, timeout=runner.timeout, group="worker"
+        )
+    
+    # Database patterns
+    if any(pattern in name for pattern in ("db:", "database:", "migrate", "seed")):
+        return Runner(
+            name=runner.name, argv=runner.argv, description=runner.description,
+            flags=runner.flags, check=runner.check, timeout=runner.timeout, group="database"
+        )
+    
+    return runner
+
+
+def _configured_ruff(root: Path) -> bool:
+    if (root / "ruff.toml").is_file() or (root / ".ruff.toml").is_file():
+        return True
+    pyproject = root / "pyproject.toml"
+    try:
+        return pyproject.is_file() and "[tool.ruff" in pyproject.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
 def _check_kind(name: str) -> str:
     return name.split(":", 1)[-1] if ":" in name else name
 
 
-def _configured_ruff(root: Path) -> bool:
+def _parse_procfile(root: Path) -> Dict[str, List[str]]:
+    """Parse Procfile for process definitions. Returns {group: [runner_names]}."""
+    procfile = root / "Procfile"
+    if not procfile.is_file():
+        return {}
+    
+    groups: Dict[str, List[str]] = {}
+    try:
+        content = procfile.read_text(encoding="utf-8", errors="replace")
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if ":" not in line:
+                continue
+            process_type, command = line.split(":", 1)
+            process_type = process_type.strip().lower()
+            command = command.strip()
+            
+            # Map common process types to groups
+            group_map = {
+                "web": "frontend",
+                "api": "backend",
+                "backend": "backend",
+                "worker": "worker",
+                "queue": "worker",
+                "scheduler": "worker",
+                "clock": "worker",
+                "db": "database",
+                "migrate": "database",
+            }
+            group = group_map.get(process_type, process_type)
+            if group not in groups:
+                groups[group] = []
+            # Store the command for later matching
+            groups[group].append(command.strip())
+    except OSError:
+        pass
+    return groups
+
+
+def _detect_workspace_scripts(root: Path) -> Dict[str, List[str]]:
+    """Detect scripts from package.json workspaces. Returns {group: [runner_names]}."""
+    package = root / "package.json"
+    if not package.is_file():
+        return {}
+    
+    try:
+        data = json.loads(package.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}
+    
+    workspaces = data.get("workspaces", [])
+    if not workspaces:
+        return {}
+    
+    groups: Dict[str, List[str]] = {}
+    # Expand workspace globs
+    workspace_paths: List[Path] = []
+    for pattern in workspaces:
+        if isinstance(pattern, str):
+            for path in root.glob(pattern):
+                if path.is_dir():
+                    workspace_paths.append(path)
+    
+    group_map = {
+        "web": "frontend", "frontend": "frontend", "client": "frontend", "app": "frontend",
+        "api": "backend", "backend": "backend", "server": "backend",
+        "worker": "worker", "queue": "worker", "jobs": "worker",
+    }
+    
+    for ws_path in workspace_paths:
+        ws_package = ws_path / "package.json"
+        if not ws_package.is_file():
+            continue
+        try:
+            ws_data = json.loads(ws_package.read_text(encoding="utf-8"))
+            ws_name = ws_data.get("name") or ws_path.name
+            ws_scripts = ws_data.get("scripts", {})
+            if "dev" in ws_scripts or "start" in ws_scripts:
+                group = group_map.get(ws_name.lower().split("/")[-1], ws_name.lower().split("/")[-1])
+                if group not in groups:
+                    groups[group] = []
+                groups[group].append(f"npm:dev")  # Will be matched by name
+        except (ValueError, OSError):
+            continue
+    
+    return groups
+
+
+def _auto_group_runners(runners: List[Runner]) -> List[Runner]:
+    """Auto-assign groups to runners based on name/command patterns."""
+    return [_assign_group(r) for r in runners]
+
+
+def get_stack_groups(root: Path) -> Dict[str, List[str]]:
+    """Detect all available stack groups for a project.
+    
+    Returns a dict mapping group names to lists of runner names that belong to each group.
+    Priority: Procfile > workspace scripts > auto-detection from runner names.
+    """
+    groups: Dict[str, List[str]] = {}
+    
+    # 1. Try Procfile first (explicit declaration)
+    procfile_groups = _parse_procfile(root)
+    if procfile_groups:
+        # Get all detected runners to match against Procfile commands
+        runners = {r.name: r for r in detect(root)}
+        for group, commands in procfile_groups.items():
+            groups[group] = []
+            for cmd in commands:
+                # Find runners matching the Procfile command
+                for name, runner in runners.items():
+                    cmd_str = " ".join(runner.argv).lower()
+                    if cmd.lower() in cmd_str or any(part in cmd_str for part in cmd.split()):
+                        groups[group].append(name)
+        if groups:
+            return {k: v for k, v in groups.items() if v}
+    
+    # 2. Try workspace scripts
+    workspace_groups = _detect_workspace_scripts(root)
+    if workspace_groups:
+        return workspace_groups
+    
+    # 3. Auto-detect from runner names
+    runners_list = detect(root)
+    grouped = _auto_group_runners(runners_list)
+    for runner in grouped:
+        if runner.group:
+            if runner.group not in groups:
+                groups[runner.group] = []
+            groups[runner.group].append(runner.name)
+    
+    return {k: v for k, v in groups.items() if v}
+
+
+def get_stack_runners(root: Path) -> List[Runner]:
+    """Get all runners with group assignments for stack operations."""
+    runners = detect(root)
+    return _auto_group_runners(runners)
     if (root / "ruff.toml").is_file() or (root / ".ruff.toml").is_file():
         return True
     pyproject = root / "pyproject.toml"

@@ -50,6 +50,7 @@ import ActivityPanel from './ActivityPanel';
 import AppCard from './AppCard';
 import ChangeCard from './ChangeCard';
 import StepOutput from './StepOutput';
+import CuaDriverOutput from './CuaDriverOutput';
 
 /** How each verdict reads. The gate's word, not the model's.
  *
@@ -89,6 +90,56 @@ const PHRASES: Record<string, (n: number) => string> = {
   start_app: () => 'started the app',
   stop_app: () => 'stopped the app',
   look_at_app: (n) => (n === 1 ? 'looked at the app' : `looked at the app ${n}×`),
+  // cua-driver computer use tools
+  get_desktop_state: (n) => (n === 1 ? 'captured desktop' : `captured desktop ${n}×`),
+  get_window_state: (n) => (n === 1 ? 'inspected window' : `inspected window ${n}×`),
+  get_accessibility_tree: (n) => (n === 1 ? 'read accessibility tree' : `read accessibility tree ${n}×`),
+  list_windows: (n) => (n === 1 ? 'listed windows' : `listed windows ${n}×`),
+  list_apps: (n) => (n === 1 ? 'listed apps' : `listed apps ${n}×`),
+  click: (n) => (n === 1 ? 'clicked' : `clicked ${n}×`),
+  double_click: (n) => (n === 1 ? 'double-clicked' : `double-clicked ${n}×`),
+  right_click: (n) => (n === 1 ? 'right-clicked' : `right-clicked ${n}×`),
+  type_text: (n) => (n === 1 ? 'typed text' : `typed text ${n}×`),
+  press_key: (n) => (n === 1 ? 'pressed key' : `pressed key ${n}×`),
+  hotkey: (n) => (n === 1 ? 'sent hotkey' : `sent hotkey ${n}×`),
+  scroll: (n) => (n === 1 ? 'scrolled' : `scrolled ${n}×`),
+  drag: (n) => (n === 1 ? 'dragged' : `dragged ${n}×`),
+  move_cursor: (n) => (n === 1 ? 'moved cursor' : `moved cursor ${n}×`),
+  set_value: (n) => (n === 1 ? 'set value' : `set value ${n}×`),
+  clipboard_read: () => 'read clipboard',
+  clipboard_write: () => 'wrote clipboard',
+  launch_app: () => 'launched app',
+  kill_app: () => 'killed app',
+  bring_to_front: () => 'brought to front',
+  set_window_frame: () => 'resized window',
+  invoke_menu: () => 'invoked menu',
+  verify_state: () => 'verified state',
+  parse_visual_regions: () => 'parsed visual regions',
+  get_screen_size: () => 'read screen size',
+  get_cursor_position: () => 'read cursor position',
+  zoom: () => 'zoomed window',
+  browser_click: () => 'clicked in browser',
+  browser_type: () => 'typed in browser',
+  browser_pointer: () => 'pointed in browser',
+  browser_dialog: () => 'handled dialog',
+  browser_set_input_files: () => 'uploaded file to browser',
+  browser_download: () => 'downloaded from browser',
+  browser_navigate: () => 'navigated browser',
+  run_actions: () => 'ran action batch',
+  start_session: () => 'started session',
+  end_session: () => 'ended session',
+  set_agent_cursor_enabled: () => 'toggled agent cursor',
+  set_agent_cursor_motion: () => 'set cursor motion',
+  set_agent_cursor_theme: () => 'set cursor theme',
+  start_recording: () => 'started recording',
+  stop_recording: () => 'stopped recording',
+  replay_trajectory: () => 'replayed trajectory',
+  install_extension: () => 'installed extension',
+  get_config: () => 'read config',
+  set_config: () => 'set config',
+  check_permissions: () => 'checked permissions',
+  health_report: () => 'ran health check',
+  install_ffmpeg: () => 'installed ffmpeg',
 };
 
 /** "Searched the web, read 3 files" — distinct actions, in the order first
@@ -170,7 +221,17 @@ function CallLine({
 }) {
   const { Icon, color, label } = VERDICTS[call.verdict] ?? UNKNOWN;
   const [showOutput, setShowOutput] = useState(false);
-  const openable = Boolean(call.output);
+  const isCuaDriver = call.server.toLowerCase().includes('cua-driver') || call.server.toLowerCase().includes('cua');
+  const hasOutput = Boolean(call.output);
+  const openable = hasOutput;
+
+  // Use specialized output for cua-driver tools
+  const renderOutput = () => {
+    if (isCuaDriver && call.output) {
+      return <CuaDriverOutput tool={call.tool} output={call.output} server={call.server} />;
+    }
+    return <StepOutput text={call.output ?? ''} />;
+  };
   return (
     <li
       className="flex flex-col text-xs leading-snug"
@@ -254,7 +315,7 @@ function CallLine({
         </button>
       )}
       {onAllowed && <AllowTool call={call} onAllowed={onAllowed} />}
-      {showOutput && <StepOutput text={call.output ?? ''} />}
+      {showOutput && renderOutput()}
     </li>
   );
 }

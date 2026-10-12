@@ -212,6 +212,75 @@ export async function fetchVoiceCatalogue(signal?: AbortSignal): Promise<VoiceCa
   }
 }
 
+/* ============================================================================
+ * Active Provider Voices (Tier-Aware)
+ * ============================================================================ */
+
+export interface ActiveVoiceEntry {
+  id: string;
+  name: string;
+  language: string;
+  languageCode: string;
+  gender: 'female' | 'male' | 'unknown';
+  provider: string;
+  /** Offered at all: not behind a language pack this install lacks. */
+  available: boolean;
+  /** On this machine now, read off the local cache. `false` means a download. */
+  installed: boolean;
+  /** What a greyed voice needs (`misaki[ja]`), or null. */
+  requires: string | null;
+  /** What the download costs. The pack's voices are about half a megabyte each. */
+  sizeBytes: number;
+  /** The voice that speaks when none has been chosen. */
+  default: boolean;
+  grade: string | null;
+}
+
+export interface ActiveVoiceCatalogue {
+  provider: string | null;
+  activeTier: string | null;
+  voices: ActiveVoiceEntry[];
+  providerHealth: string;
+}
+
+export async function fetchActiveVoiceCatalogue(signal?: AbortSignal): Promise<ActiveVoiceCatalogue> {
+  try {
+    const res = await fetch(`${API_BASE}/voice/voices/active`, { signal });
+    if (!res.ok) return { provider: null, activeTier: null, voices: [], providerHealth: 'unavailable' };
+    // The backend speaks snake_case. This was cast straight to camelCase types, so
+    // `activeTier`, `providerHealth` and `languageCode` were always undefined and the
+    // line under the list said "unknown tier".
+    const raw = (await res.json()) as {
+      provider?: string | null;
+      active_tier?: string | null;
+      provider_health?: string;
+      voices?: Array<Record<string, unknown>>;
+    };
+    return {
+      provider: raw.provider ?? null,
+      activeTier: raw.active_tier ?? null,
+      providerHealth: raw.provider_health ?? 'unknown',
+      voices: (raw.voices ?? []).map((v) => ({
+        id: String(v.id),
+        name: String(v.name ?? v.id),
+        language: String(v.language ?? 'unknown'),
+        languageCode: String(v.language_code ?? ''),
+        gender: (v.gender === 'female' || v.gender === 'male' ? v.gender : 'unknown') as ActiveVoiceEntry['gender'],
+        provider: String(v.provider ?? ''),
+        available: v.available !== false,
+        // Absent means a provider with nothing to download, which is on hand.
+        installed: v.installed !== false,
+        requires: typeof v.requires === 'string' ? v.requires : null,
+        sizeBytes: typeof v.size_bytes === 'number' ? v.size_bytes : 0,
+        default: v.default === true,
+        grade: typeof v.grade === 'string' ? v.grade : null,
+      })),
+    };
+  } catch {
+    return { provider: null, activeTier: null, voices: [], providerHealth: 'unavailable' };
+  }
+}
+
 /** Fetch one voice. The backend records it in the egress log before the first byte. */
 export async function downloadVoice(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/voice/voices/${encodeURIComponent(id)}/download`, {
@@ -219,4 +288,170 @@ export async function downloadVoice(id: string): Promise<void> {
     headers: CLIENT_HEADER,
   });
   await readOrThrow(res);
+}
+
+/* ============================================================================
+ * 4-Tier Voice Pipeline: Tier Management
+ * ============================================================================ */
+
+export interface TierStatusEntry {
+  provider: string;
+  eligible: boolean;
+  /** False while the engine behind the tier is a placeholder that cannot speak yet. */
+  implemented?: boolean;
+  reason: string;
+  description: string;
+  requires_cloud: boolean;
+  requires_gpu: boolean;
+}
+
+export interface TierStatus {
+  active_tier: string | null;
+  active_provider: string | null;
+  auto_tier_enabled: boolean;
+  prefer_local: boolean;
+  tier_status: Record<string, TierStatusEntry>;
+  fallback_tier?: string;
+}
+
+export async function fetchTierStatus(signal?: AbortSignal): Promise<TierStatus> {
+  try {
+    const res = await fetch(`${API_BASE}/voice/tier`, { signal });
+    if (!res.ok) return { active_tier: null, active_provider: null, auto_tier_enabled: false, prefer_local: true, tier_status: {} };
+    return (await res.json()) as TierStatus;
+  } catch {
+    return { active_tier: null, active_provider: null, auto_tier_enabled: false, prefer_local: true, tier_status: {} };
+  }
+}
+
+export async function selectTier(tier: string): Promise<{ selected_tier: string; provider: string; reason: string }> {
+  const res = await fetch(`${API_BASE}/voice/tier/select`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...CLIENT_HEADER },
+    body: JSON.stringify({ tier }),
+  });
+  return readOrThrow(res) as Promise<{ selected_tier: string; provider: string; reason: string }>;
+}
+
+export async function enableAutoTier(): Promise<{ selected_tier: string; provider: string; reason: string }> {
+  const res = await fetch(`${API_BASE}/voice/tier/auto`, {
+    method: 'POST',
+    headers: CLIENT_HEADER,
+  });
+  return readOrThrow(res) as Promise<{ selected_tier: string; provider: string; reason: string }>;
+}
+
+/* ============================================================================
+ * Hardware Profile
+ * ============================================================================ */
+
+export interface HardwareProfile {
+  gpu_vendor: string;
+  gpu_name: string;
+  total_vram_gb: number | null;
+  free_vram_gb: number | null;
+  total_system_ram_gb: number | null;
+  free_system_ram_gb: number | null;
+  cloud_llm_active: boolean;
+  cloud_llm_provider: string | null;
+  local_llm_active: boolean;
+  local_llm_model_id: string | null;
+  local_llm_vram_footprint_gb: number | null;
+  os_name: string;
+  arch: string;
+}
+
+export async function fetchHardwareProfile(signal?: AbortSignal): Promise<HardwareProfile> {
+  try {
+    const res = await fetch(`${API_BASE}/voice/hardware`, { signal });
+    if (!res.ok) {
+      return {
+        gpu_vendor: 'unknown',
+        gpu_name: 'unknown',
+        total_vram_gb: null,
+        free_vram_gb: null,
+        total_system_ram_gb: null,
+        free_system_ram_gb: null,
+        cloud_llm_active: false,
+        cloud_llm_provider: null,
+        local_llm_active: false,
+        local_llm_model_id: null,
+        local_llm_vram_footprint_gb: null,
+        os_name: 'unknown',
+        arch: 'unknown',
+      };
+    }
+    return (await res.json()) as HardwareProfile;
+  } catch {
+    return {
+      gpu_vendor: 'unknown',
+      gpu_name: 'unknown',
+      total_vram_gb: null,
+      free_vram_gb: null,
+      total_system_ram_gb: null,
+      free_system_ram_gb: null,
+      cloud_llm_active: false,
+      cloud_llm_provider: null,
+      local_llm_active: false,
+      local_llm_model_id: null,
+      local_llm_vram_footprint_gb: null,
+      os_name: 'unknown',
+      arch: 'unknown',
+    };
+  }
+}
+
+/* ============================================================================
+ * Voice Asset Cleanup
+ * ============================================================================ */
+
+export interface CacheStatus {
+  total_voices_cached: number;
+  total_size_bytes: number;
+  total_size_mb: number;
+  keep_voice: string;
+  keep_voice_size_bytes: number;
+  deletable_voices: number;
+  deletable_size_bytes: number;
+  deletable_size_mb: number;
+  by_backend: Record<string, { count: number; size_bytes: number; voices: string[] }>;
+}
+
+export async function fetchCacheStatus(keepVoice: string = '', signal?: AbortSignal): Promise<CacheStatus> {
+  try {
+    const res = await fetch(`${API_BASE}/voice/cache/status?keep_voice=${encodeURIComponent(keepVoice)}`, { signal });
+    if (!res.ok) throw new Error('Failed to fetch cache status');
+    return (await res.json()) as CacheStatus;
+  } catch {
+    return {
+      total_voices_cached: 0,
+      total_size_bytes: 0,
+      total_size_mb: 0,
+      keep_voice: keepVoice,
+      keep_voice_size_bytes: 0,
+      deletable_voices: 0,
+      deletable_size_bytes: 0,
+      deletable_size_mb: 0,
+      by_backend: {},
+    };
+  }
+}
+
+export interface CleanupReport {
+  deleted_count: number;
+  freed_bytes: number;
+  freed_mb: number;
+  kept_count: number;
+  dry_run: boolean;
+  errors: string[];
+}
+
+export async function cleanupVoiceCache(keepVoice: string, dryRun: boolean): Promise<CleanupReport> {
+  const res = await fetch(`${API_BASE}/voice/cache/cleanup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...CLIENT_HEADER },
+    body: JSON.stringify({ keep_voice: keepVoice, dry_run: dryRun }),
+  });
+  const data = await readOrThrow(res);
+  return data as unknown as CleanupReport;
 }

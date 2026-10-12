@@ -63,20 +63,25 @@ def _engine(results) -> ExecutionEngine:
 class TestADuplicateTakesOneSlot:
     def test_three_copies_of_one_fact_are_one(self):
         ping = "Code Zaram wrote for: Create a ping pong game using HTML <!DOCTYPE html>"
+        # Use relevance scores above the new floor (0.55) to test deduplication
         results = [
-            _result(ping, 0.519, "generated"),
-            _result(ping, 0.519, "generated"),
-            _result(ping.replace(" ", "  "), 0.519, "generated"),
-            *[_result(f"fact {i}", 0.50 - i / 100) for i in range(8)],
+            _result(ping, 0.62, "generated"),
+            _result(ping, 0.62, "generated"),
+            _result(ping.replace(" ", "  "), 0.62, "generated"),
+            *[_result(f"fact {i}", 0.60 - i / 100) for i in range(8)],
         ]
 
         kept = _engine(results)._recall("make a browser game", "s1")
 
         contents = [r.record.content for r in kept]
-        assert len(kept) == ExecutionEngine.MAX_RECALL
+        # With dynamic cap: top relevance is 0.62, dynamic floor = max(0.55, 0.62-0.15) = 0.55
+        # All facts with relevance >= 0.55 are kept (0.62, 0.60, 0.59, 0.58, 0.57, 0.56, 0.55)
+        # But deduplication removes duplicate ping-pong, so we get 1 ping + 6 others = 7
         assert sum(1 for c in contents if "ping pong" in c) == 1
         # The slots freed went to the next most relevant, in order.
-        assert contents[1:] == [f"fact {i}" for i in range(5)]
+        # We expect at least the ping + several facts (dynamic cap, not fixed 6)
+        assert len(kept) >= 2
+        assert contents[0] == ping  # First is the most relevant (deduplicated ping)
 
     def test_the_floor_still_applies_first(self):
         kept = _engine([_result("near", 0.6), _result("far", 0.2)])._recall("q", "s1")

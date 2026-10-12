@@ -90,6 +90,9 @@ conversations.db-journal
 conversations.db-wal
 conversations.db-shm
 backend/conversations.db*
+# Copies of pictures attached to conversations, so a page keeps showing them.
+# Personal photographs; never committed. See conversations/pictures.py.
+backend/conversation-pictures/
 
 # The egress log and its policy. A record of every question that left the
 # machine is the most private file Zaram holds — more so than the Spine, which
@@ -324,6 +327,11 @@ backend/**/*.sqlite3
 # Spine, by definition.
 backend/backups/
 
-# Screenshots of the user's own pages, taken by `look_at_app`. In a checkout
-# `data_dir()` is `backend/`, so they land here rather than under AppData.
+# Screenshots of the user's own pages, taken by `look_at_app`, and pictures
+# tools return (`screens/tools`). In a checkout `data_dir()` is `backend/`, so
+# they land here rather than under AppData.
 backend/screens/
+
+# Programs installed through Zaram (cua-driver) -- a vendor's binaries on the
+# person's machine, same reasoning as the screenshots above.
+backend/bin/

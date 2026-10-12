@@ -39,6 +39,10 @@ export interface ChatAttachment {
    *  own field on the request, is never excerpted, and can only go to a model
    *  that can see. */
   kind: string;
+  /** For an image: the short name a page or document refers to it by (the
+   *  backend's `attachments/pictures.py`). `''` for a document, and for an
+   *  image no destination can use. */
+  page_name?: string;
   created_at: number;
 }
 

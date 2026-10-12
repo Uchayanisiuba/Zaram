@@ -25,6 +25,14 @@ Claims in a document carry their source, and the sources are listed at the end i
 
 Under **Settings → Letterhead**, set your name, address and logo once. Every document carries them.
 
+## A picture in a document
+
+Attach a photo and say where it goes — *add my passport photo to the top of this cover letter*. The model is told the picture's name and writes it into the document; Zaram puts the real picture in when the file is made, on your computer. It works for letters, reports, proposals and other written documents, in Word and on the page.
+
+Invoices, quotes, CVs and slide decks are filled in from fields, and each has one place for a picture. An invoice or quote takes a **logo** at the top (*put my logo on the invoice*), a CV takes a **photo** beside your name (*add my photo to my CV*), and a slide deck takes a **picture on a slide**, next to that slide's points (*put this diagram on the slide about pricing*). They appear in the Word file and the PowerPoint file as well as on the page. Zaram only places a picture you asked for. If it names one that is not attached to this conversation, the picture is left out and Zaram tells you which, rather than guessing. Spreadsheets have no place for a picture.
+
+Each picture used is recorded as a source — a file you supplied — so the document says where it came from. Zaram lays the picture out; it does not decide whether a form or photo meets anyone's requirements.
+
 ## A document as a shape
 
 Attach a document you already have and ask for another like it. Zaram follows its structure.

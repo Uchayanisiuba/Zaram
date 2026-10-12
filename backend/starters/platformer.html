@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Platformer</title>
+<!--
+  Zaram starter: platformer. A small, light third-person 3D obstacle course:
+  run, jump (with coyote time), ride moving platforms, collect coins, restart
+  from the last checkpoint after a fall, and reach the flag. Built to run beside
+  a local model: a few merged meshes, no lights, no shadows, pixel ratio 1.
+  Change the SETTINGS block first; the course is the LEVEL list.
+-->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #8fd0f5; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  .screen { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 14px; background: rgba(12, 16, 28, 0.78); color: #eef2f8; text-align: center; cursor: pointer; user-select: none; }
+  .screen h1 { margin: 0; font-size: 44px; letter-spacing: 1px; }
+  .screen .go { padding: 12px 28px; border-radius: 8px; background: #3b9c5a; font-size: 18px; }
+  .screen .keys { font-size: 13px; opacity: 0.75; max-width: 540px; line-height: 1.6; }
+  #win { display: none; }
+  #info { position: fixed; left: 10px; top: 8px; z-index: 5; color: #fff; font-size: 12px; text-shadow: 0 1px 2px #000; pointer-events: none; }
+  #hud { position: fixed; right: 14px; top: 8px; z-index: 5; color: #fff; font-size: 18px; text-align: right; line-height: 1.5;
+         text-shadow: 0 1px 3px #000; pointer-events: none; }
+  #msg { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); z-index: 5; color: #fff; font-size: 26px; font-weight: 700;
+         text-shadow: 0 2px 4px #000; pointer-events: none; }
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head>
+<body>
+<div id="start" class="screen">
+  <h1>Platformer</h1>
+  <div class="go">Click to play</div>
+  <div class="keys">WASD move · Space jump (tap for a short hop, hold for a high one) · Drag the mouse or use the arrow keys to turn the camera ·
+    Wheel zoom · R go back to the last checkpoint · Esc or P pause<br>Collect the coins, ride the moving platforms and reach the flag.</div>
+</div>
+<div id="win" class="screen">
+  <h1>You made it!</h1>
+  <div class="keys" id="stats" style="font-size:18px"></div>
+  <div class="go">Click to play again</div>
+</div>
+<div id="info"></div>
+<div id="hud"></div>
+<div id="msg"></div>
+<script type="module">
+import * as THREE from 'three';
+
+// ---------------------------------------------------------------- SETTINGS
+const SPAWN = [0, 0, 0];             // where the player starts and first returns to: x, feet height, z (the course itself starts at 0, 0, 0)
+const WALK_SPEED = 7, JUMP_SPEED = 10, GRAVITY = 28, MAX_FALL = 40;
+const GROUND_ACCEL = 18, AIR_ACCEL = 5;   // how quickly the player reaches the wanted speed
+const COYOTE_TIME = 0.12;            // seconds after leaving an edge that a jump still works
+const JUMP_BUFFER = 0.12;            // a jump pressed this long before landing still happens
+const PLAYER_HALF_WIDTH = 0.4, PLAYER_HEIGHT = 1.8;
+const KILL_Y = -14;                  // falling below this goes back to the last checkpoint
+const THICKNESS = 1.2;               // how deep each platform is
+const CAM_DIST = 9, CAM_PITCH = 0.42, CAM_SMOOTH = 8, MOUSE_SENSITIVITY = 0.005, CAM_KEY_SPEED = 2.2;
+const SKY = 0x8fd0f5;
+const PALETTE = [0x5fb86b, 0x56a8c9, 0xc98b56, 0xb56fc4, 0xd2c050];   // platform colours, in turn
+const MOVER_COLOR = 0xe2683a, CHECK_COLOR = 0x3f7fd9, GOAL_COLOR = 0xe3b92f;
+
+// ------------------------------------------------------------------- LEVEL
+// The course runs away from the camera (towards -z). Each step is placed after the
+// one before it: `gap` is the empty space between them, `up` how much higher the top
+// is, `w` and `d` the size, `shift` how far it sits to the side.
+//   move: 'x' | 'y' | 'z'  slides back and forth by `range`, `speed` radians per second
+//   coins: n coins above it · check: true  a checkpoint · goal: true  the flag
+// Keep `gap` under 3.2 and `up` under 1.2 so every jump can be made; a moving
+// platform's gap is measured to the nearest end of its travel.
+const START = { w: 10, d: 10 };
+const LEVEL = [
+  { gap: 2.0, up: 0,   w: 4, d: 4, coins: 1 },
+  { gap: 2.5, up: 0.6, w: 4, d: 4 },
+  { gap: 2.8, up: 0.6, w: 3, d: 3, shift: 1, coins: 1 },
+  { gap: 2.5, up: 0,   w: 6, d: 6, check: true, coins: 3 },
+  { gap: 1.0, up: 0,   w: 4, d: 4, move: 'z', range: 3, speed: 1.0 },
+  { gap: 1.0, up: 0,   w: 8, d: 8, coins: 2 },
+  { gap: 2.5, up: 0.5, w: 2.5, d: 2.5, shift: 2 },
+  { gap: 2.5, up: 0.5, w: 2.5, d: 2.5, shift: -2, coins: 1 },
+  { gap: 2.5, up: 0.5, w: 2.5, d: 2.5, shift: 2 },
+  { gap: 2.5, up: 0,   w: 6, d: 6, check: true, coins: 3 },
+  { gap: 1.0, up: 0,   w: 4, d: 4, move: 'y', range: 2.5, speed: 1.1 },
+  { gap: 1.2, up: 0,   w: 8, d: 8, check: true, coins: 2 },
+  { gap: 1.5, up: 0,   w: 4, d: 4, move: 'x', range: 4, speed: 1.2 },
+  { gap: 1.5, up: 0,   w: 8, d: 6, coins: 1 },
+  { gap: 2.0, up: 0,   w: 1.6, d: 10, coins: 2 },
+  { gap: 2.5, up: 1.0, w: 3, d: 3 },
+  { gap: 2.5, up: 1.0, w: 3, d: 3, shift: 1.5, coins: 1 },
+  { gap: 2.5, up: 1.0, w: 3, d: 3, shift: -1.5 },
+  { gap: 2.5, up: 0,   w: 8, d: 8, goal: true },
+];
+
+// ------------------------------------------------------------------- MESHES
+const LIGHT = (() => { const l = new THREE.Vector3(0.45, 0.8, 0.35).normalize(); return [l.x, l.y, l.z]; })();
+// Collects boxes with a fixed light baked into vertex colours, so the scene needs
+// no lights. Every face is turned to look away from the box's centre.
+class Mesher {
+  constructor() { this.pos = []; this.col = []; }
+  tri(a, b, c, hex, o) {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const mx = (a[0] + b[0] + c[0]) / 3 - o[0], my = (a[1] + b[1] + c[1]) / 3 - o[1], mz = (a[2] + b[2] + c[2]) / 3 - o[2];
+    if (nx * mx + ny * my + nz * mz < 0) { const t = b; b = c; c = t; nx = -nx; ny = -ny; nz = -nz; }
+    const len = Math.hypot(nx, ny, nz) || 1;
+    const k = 0.55 + 0.45 * Math.max(0, (nx * LIGHT[0] + ny * LIGHT[1] + nz * LIGHT[2]) / len);
+    const color = new THREE.Color(hex);
+    const pts = [a, b, c];
+    for (let i = 0; i < 3; i++) {
+      this.pos.push(pts[i][0], pts[i][1], pts[i][2]);
+      this.col.push(color.r * k, color.g * k, color.b * k);
+    }
+  }
+  quad(a, b, c, d, hex, o) { this.tri(a, b, c, hex, o); this.tri(a, c, d, hex, o); }
+  box(cx, cy, cz, w, h, d, hex) {
+    const p = [];
+    for (let i = 0; i < 8; i++) p.push([cx + (i & 1 ? w : -w) / 2, cy + (i & 2 ? h : -h) / 2, cz + (i & 4 ? d : -d) / 2]);
+    const faces = [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 5, 4], [2, 3, 7, 6], [0, 2, 6, 4], [1, 3, 7, 5]];
+    const o = [cx, cy, cz];
+    for (let i = 0; i < faces.length; i++) this.quad(p[faces[i][0]], p[faces[i][1]], p[faces[i][2]], p[faces[i][3]], hex, o);
+  }
+  geometry() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    g.computeBoundingSphere();
+    return g;
+  }
+}
+const material = new THREE.MeshBasicMaterial({ vertexColors: true });
+const boxGeometry = (w, h, d, hex) => { const m = new Mesher(); m.box(0, 0, 0, w, h, d, hex); return m.geometry(); };
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(SKY);
+scene.fog = new THREE.Fog(SKY, 70, 260);
+
+// --------------------------------------------------------------- BUILD LEVEL
+// Every platform is a box: min and max on each axis. Moving ones update theirs each step.
+const platforms = [];
+const movers = [];
+const coins = [];
+const checkpoints = [];            // { x, y, z, flag }
+const goal = { x: 0, y: 0, z: 0 };
+let simTime = 0;
+
+function addPlatform(cx, top, cz, w, d, color, move, range, speed) {
+  const p = { w, d, bx: cx, by: top, bz: cz, cx, top, cz, minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0,
+    move: move || '', range: range || 0, speed: speed || 0, phase: 0, dx: 0, dy: 0, dz: 0, mesh: null, check: -1 };
+  place(p, 0);
+  p.dx = p.dy = p.dz = 0;
+  platforms.push(p);
+  if (p.move) movers.push(p);
+  return p;
+}
+// Where a platform is at time t.
+function place(p, t) {
+  const s = p.move ? p.range * Math.sin(p.phase + t * p.speed) : 0;
+  const ox = p.cx, oy = p.top, oz = p.cz;
+  p.cx = p.bx + (p.move === 'x' ? s : 0);
+  p.top = p.by + (p.move === 'y' ? s : 0);
+  p.cz = p.bz + (p.move === 'z' ? s : 0);
+  p.dx = p.cx - ox; p.dy = p.top - oy; p.dz = p.cz - oz;
+  p.minX = p.cx - p.w / 2; p.maxX = p.cx + p.w / 2;
+  p.minZ = p.cz - p.d / 2; p.maxZ = p.cz + p.d / 2;
+  p.maxY = p.top; p.minY = p.top - THICKNESS;
+}
+
+const staticBuild = new Mesher();
+const flagOff = new THREE.MeshBasicMaterial({ color: 0x9aa3ad }), flagOn = new THREE.MeshBasicMaterial({ color: 0x35c46a });
+const flagGeometry = new THREE.BoxGeometry(1.4, 0.8, 0.08);
+const coinGeometry = boxGeometry(0.7, 0.7, 0.14, 0xffd23a);
+
+(function buildLevel() {
+  const start = addPlatform(0, 0, 0, START.w, START.d, PALETTE[0]);
+  staticBuild.box(start.cx, start.top - THICKNESS / 2, start.cz, start.w, THICKNESS, start.d, 0x8a8f99);
+  checkpoints.push({ x: SPAWN[0], y: SPAWN[1], z: SPAWN[2], flag: null });
+  let curX = start.cx, curTop = start.top, edgeZ = start.minZ;
+  LEVEL.forEach((s, n) => {
+    const travel = s.move === 'z' ? 2 * (s.range || 0) : 0;
+    const envelope = s.d + travel;
+    const cz = edgeZ - s.gap - envelope / 2;
+    edgeZ = cz - envelope / 2;
+    curX += s.shift || 0;
+    let top = curTop + (s.up || 0);
+    if (s.move === 'y') top += s.range;              // the lowest point of the lift is the previous top
+    const color = s.goal ? GOAL_COLOR : s.check ? CHECK_COLOR : s.move ? MOVER_COLOR : PALETTE[(n + 1) % PALETTE.length];
+    const p = addPlatform(curX, top, cz, s.w, s.d, color, s.move, s.range, s.speed);
+    p.phase = s.move ? (n % 2) * Math.PI : 0;       // neighbours do not move in step
+    place(p, 0); p.dx = p.dy = p.dz = 0;
+    if (s.move) {
+      p.mesh = new THREE.Mesh(boxGeometry(s.w, THICKNESS, s.d, color), material);
+      scene.add(p.mesh);
+    } else {
+      staticBuild.box(p.cx, p.top - THICKNESS / 2, p.cz, s.w, THICKNESS, s.d, color);
+    }
+    curTop = s.move === 'y' ? top + s.range : top;
+    if (s.coins && !s.move) {
+      for (let i = 0; i < s.coins; i++) {
+        const c = new THREE.Mesh(coinGeometry, material);
+        c.position.set(p.cx + (i - (s.coins - 1) / 2) * 1.4, p.top + 1.2, p.cz);
+        scene.add(c);
+        coins.push({ mesh: c, got: false });
+      }
+    }
+    if (s.check) {
+      p.check = checkpoints.length;
+      const flag = addFlag(p.cx, p.top, p.cz, flagOff);
+      checkpoints.push({ x: p.cx, y: p.top, z: p.cz, flag });
+    }
+    if (s.goal) {
+      goal.x = p.cx; goal.y = p.top; goal.z = p.cz;
+      addFlag(p.cx, p.top, p.cz, new THREE.MeshBasicMaterial({ color: GOAL_COLOR }), 1.7);
+    }
+  });
+  scene.add(new THREE.Mesh(staticBuild.geometry(), material));
+
+  // A scatter of distant cubes, so there is something to see below the course.
+  const far = new Mesher();
+  let seed = 12345;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  for (let i = 0; i < 40; i++) {
+    const w = 6 + rnd() * 14, h = 2 + rnd() * 6;
+    far.box((rnd() - 0.5) * 160, -22 - rnd() * 8, edgeZ / 2 + (rnd() - 0.5) * (Math.abs(edgeZ) + 80), w, h, w, 0xaab7cf);
+  }
+  scene.add(new THREE.Mesh(far.geometry(), material));
+})();
+
+function addFlag(x, y, z, flagMaterial, scale = 1) {
+  const pole = new Mesher();
+  pole.box(0, 1.5 * scale, 0, 0.12, 3 * scale, 0.12, 0xdddddd);
+  const post = new THREE.Mesh(pole.geometry(), material);
+  post.position.set(x, y, z);
+  scene.add(post);
+  const flag = new THREE.Mesh(flagGeometry, flagMaterial);
+  flag.position.set(x + 0.7, y + 2.6 * scale, z);
+  scene.add(flag);
+  return flag;
+}
+
+// ------------------------------------------------------------------ PLAYER
+const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, onGround: false, ground: -1, coyote: 0, buffer: 0, jumping: false, face: 0 };
+const run = { coins: 0, deaths: 0, time: 0, checkpoint: 0, won: false };
+
+const playerGroup = new THREE.Group();
+const bodyMesh = (() => {
+  const m = new Mesher();
+  m.box(0, 1.0, 0, 0.7, 0.6, 0.45, 0x3b82d9);          // torso
+  m.box(0, 1.55, 0, 0.5, 0.5, 0.5, 0xf1c9a0);          // head
+  m.box(0, 1.8, 0, 0.56, 0.12, 0.56, 0xd8453a);        // cap
+  m.box(0.4, 1.0, 0, 0.14, 0.5, 0.2, 0x3b82d9);        // arms
+  m.box(-0.4, 1.0, 0, 0.14, 0.5, 0.2, 0x3b82d9);
+  m.box(0.12, 1.58, 0.26, 0.1, 0.1, 0.04, 0x14161c);   // eyes (the front is +z)
+  m.box(-0.12, 1.58, 0.26, 0.1, 0.1, 0.04, 0x14161c);
+  return new THREE.Mesh(m.geometry(), material);
+})();
+const legGeometry = (() => { const m = new Mesher(); m.box(0, -0.3, 0, 0.3, 0.6, 0.3, 0x2c3e66); return m.geometry(); })();
+const legs = [new THREE.Mesh(legGeometry, material), new THREE.Mesh(legGeometry, material)];
+legs[0].position.set(0.17, 0.7, 0); legs[1].position.set(-0.17, 0.7, 0);
+playerGroup.add(bodyMesh, legs[0], legs[1]);
+scene.add(playerGroup);
+
+// A dark disc on the platform below tells you where you will land.
+const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 14), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }));
+shadow.rotation.x = -Math.PI / 2;
+scene.add(shadow);
+
+const EPS = 1e-4;
+const touches = (p) =>
+  P.x + PLAYER_HALF_WIDTH > p.minX + EPS && P.x - PLAYER_HALF_WIDTH < p.maxX - EPS &&
+  P.z + PLAYER_HALF_WIDTH > p.minZ + EPS && P.z - PLAYER_HALF_WIDTH < p.maxZ - EPS &&
+  P.y + PLAYER_HEIGHT > p.minY + EPS && P.y < p.maxY - EPS;
+
+// Move along one axis; on contact stop flush against the platform that was hit.
+// Landing on a platform's top is what sets onGround.
+function move(axis, amount) {
+  if (amount === 0) return;
+  P[axis] += amount;
+  for (let i = 0; i < platforms.length; i++) {
+    const p = platforms[i];
+    if (!touches(p)) continue;
+    if (axis === 'y') {
+      if (amount < 0) { P.y = p.maxY; P.onGround = true; P.ground = i; }
+      else P.y = p.minY - PLAYER_HEIGHT - 0.001;
+      P.vy = 0;
+    } else if (axis === 'x') {
+      P.x = amount > 0 ? p.minX - PLAYER_HALF_WIDTH - 0.001 : p.maxX + PLAYER_HALF_WIDTH + 0.001;
+      P.vx = 0;
+    } else {
+      P.z = amount > 0 ? p.minZ - PLAYER_HALF_WIDTH - 0.001 : p.maxZ + PLAYER_HALF_WIDTH + 0.001;
+      P.vz = 0;
+    }
+  }
+}
+
+// A platform that slid into the player pushes them out the shortest way.
+function pushOut(p) {
+  if (!touches(p)) return;
+  const px = p.maxX - (P.x - PLAYER_HALF_WIDTH), nx = P.x + PLAYER_HALF_WIDTH - p.minX;
+  const pz = p.maxZ - (P.z - PLAYER_HALF_WIDTH), nz = P.z + PLAYER_HALF_WIDTH - p.minZ;
+  const py = p.maxY - P.y, ny = P.y + PLAYER_HEIGHT - p.minY;
+  const m = Math.min(px, nx, pz, nz, py, ny);
+  if (m === py) P.y = p.maxY;
+  else if (m === ny) P.y = p.minY - PLAYER_HEIGHT - 0.001;
+  else if (m === px) P.x = p.maxX + PLAYER_HALF_WIDTH + 0.001;
+  else if (m === nx) P.x = p.minX - PLAYER_HALF_WIDTH - 0.001;
+  else if (m === pz) P.z = p.maxZ + PLAYER_HALF_WIDTH + 0.001;
+  else P.z = p.minZ - PLAYER_HALF_WIDTH - 0.001;
+}
+
+function respawn() {
+  const c = checkpoints[run.checkpoint];
+  P.x = c.x; P.y = c.y + 0.01; P.z = c.z;
+  P.vx = P.vy = P.vz = 0; P.ground = -1; P.onGround = false; P.coyote = 0; P.jumping = false;
+}
+
+function restart() {
+  run.coins = 0; run.deaths = 0; run.time = 0; run.checkpoint = 0; run.won = false;
+  for (let i = 0; i < coins.length; i++) { coins[i].got = false; coins[i].mesh.visible = true; }
+  for (let i = 1; i < checkpoints.length; i++) checkpoints[i].flag.material = flagOff;
+  respawn();
+}
+
+// ------------------------------------------------------------------- INPUT
+const keys = new Set();
+let playing = false, locked = false, everLocked = false, jumpCut = false;
+let camYaw = 0, camPitch = CAM_PITCH, camDist = CAM_DIST;
+const startScreen = document.getElementById('start'), winScreen = document.getElementById('win');
+
+function start() {
+  playing = true;
+  startScreen.style.display = 'none';
+  // Pointer lock is asked for, never relied on: where it is refused the game
+  // still plays, and the mouse turns the camera by dragging.
+  try {
+    const asked = renderer.domElement.requestPointerLock();
+    if (asked && asked.catch) asked.catch(() => {});
+  } catch (e) { /* plays without it */ }
+}
+function pause() {
+  playing = false; keys.clear();
+  startScreen.querySelector('.go').textContent = 'Click to continue';
+  startScreen.style.display = 'flex';
+}
+startScreen.addEventListener('click', start);
+winScreen.addEventListener('click', () => { winScreen.style.display = 'none'; restart(); start(); });
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === renderer.domElement;
+  if (locked) everLocked = true;
+  else if (everLocked && playing) pause();
+});
+window.addEventListener('keydown', (e) => {
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+  if (!playing) return;
+  keys.add(e.code);
+  if (e.code === 'Space' && !e.repeat) P.buffer = JUMP_BUFFER;
+  if (e.code === 'KeyR') respawn();
+  if ((e.code === 'Escape' && !locked) || e.code === 'KeyP') pause();
+});
+window.addEventListener('keyup', (e) => keys.delete(e.code));
+window.addEventListener('blur', () => keys.clear());
+
+function look(dx, dy) {
+  camYaw -= dx * MOUSE_SENSITIVITY;
+  camPitch = Math.max(-0.1, Math.min(1.3, camPitch + dy * MOUSE_SENSITIVITY));
+}
+let drag = null;   // where a press started, when the pointer is not locked
+window.addEventListener('mousedown', (e) => { if (playing && !locked) drag = { x: e.clientX, y: e.clientY }; });
+window.addEventListener('mousemove', (e) => {
+  if (!playing) return;
+  if (locked) look(e.movementX, e.movementY);
+  else if (drag) { look(e.clientX - drag.x, e.clientY - drag.y); drag.x = e.clientX; drag.y = e.clientY; }
+});
+window.addEventListener('mouseup', () => { drag = null; });
+window.addEventListener('wheel', (e) => { camDist = Math.max(4, Math.min(18, camDist + (e.deltaY > 0 ? 1 : -1))); }, { passive: true });
+
+// ------------------------------------------------------------------ RENDER
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'low-power' });
+renderer.setPixelRatio(1);
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.2, 400);
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// -------------------------------------------------------------------- STEP
+const STEP = 1 / 240;                 // the physics always runs in these small, equal steps
+function step(h) {
+  simTime += h; run.time += h;
+
+  // 1. Platforms move, and whatever stands on one is carried with it.
+  for (let i = 0; i < movers.length; i++) place(movers[i], simTime);
+  if (P.ground >= 0) {
+    const g = platforms[P.ground];
+    P.x += g.dx; P.y += g.dy; P.z += g.dz;
+  }
+  for (let i = 0; i < movers.length; i++) pushOut(movers[i]);
+
+  // 2. What the player wants: movement is relative to the camera.
+  let wx = 0, wz = 0;
+  const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw), rx = Math.cos(camYaw), rz = -Math.sin(camYaw);
+  if (keys.has('KeyW')) { wx += fx; wz += fz; }
+  if (keys.has('KeyS')) { wx -= fx; wz -= fz; }
+  if (keys.has('KeyD')) { wx += rx; wz += rz; }
+  if (keys.has('KeyA')) { wx -= rx; wz -= rz; }
+  const wl = Math.hypot(wx, wz);
+  if (wl > 0) { wx = (wx / wl) * WALK_SPEED; wz = (wz / wl) * WALK_SPEED; }
+  const a = 1 - Math.exp(-(P.onGround ? GROUND_ACCEL : AIR_ACCEL) * h);
+  P.vx += (wx - P.vx) * a;
+  P.vz += (wz - P.vz) * a;
+
+  // 3. Jump: allowed shortly after leaving an edge, and remembered shortly before landing.
+  if (P.buffer > 0) P.buffer -= h;
+  if (P.buffer > 0 && P.coyote > 0) {
+    P.vy = JUMP_SPEED; P.coyote = 0; P.buffer = 0; P.onGround = false; P.ground = -1; P.jumping = true; jumpCut = false;
+  }
+  if (P.jumping && P.vy > 0 && !keys.has('Space') && !jumpCut) { P.vy *= 0.5; jumpCut = true; }
+  P.vy = Math.max(-MAX_FALL, P.vy - GRAVITY * h);
+
+  // 4. Move one axis at a time. onGround is cleared and re-found every step.
+  P.onGround = false; P.ground = -1;
+  move('x', P.vx * h);
+  move('z', P.vz * h);
+  move('y', P.vy * h);
+  // Standing still on a platform is a tiny fall each step; this keeps it a clean contact.
+  if (!P.onGround && P.vy <= 0) {
+    for (let i = 0; i < platforms.length; i++) {
+      const p = platforms[i];
+      if (Math.abs(P.y - p.maxY) > 0.02) continue;
+      if (P.x + PLAYER_HALF_WIDTH > p.minX && P.x - PLAYER_HALF_WIDTH < p.maxX && P.z + PLAYER_HALF_WIDTH > p.minZ && P.z - PLAYER_HALF_WIDTH < p.maxZ) {
+        P.y = p.maxY; P.vy = 0; P.onGround = true; P.ground = i; break;
+      }
+    }
+  }
+  if (P.onGround) { P.coyote = COYOTE_TIME; P.jumping = false; } else if (P.coyote > 0) P.coyote -= h;
+
+  // 5. Things the player touches.
+  if (P.ground >= 0 && platforms[P.ground].check > run.checkpoint) {
+    run.checkpoint = platforms[P.ground].check;
+    checkpoints[run.checkpoint].flag.material = flagOn;
+    flash = 'Checkpoint'; flashUntil = run.time + 1.5;
+  }
+  for (let i = 0; i < coins.length; i++) {
+    const c = coins[i];
+    if (c.got) continue;
+    const dx = c.mesh.position.x - P.x, dy = c.mesh.position.y - (P.y + 0.9), dz = c.mesh.position.z - P.z;
+    if (dx * dx + dy * dy + dz * dz < 1.2) { c.got = true; c.mesh.visible = false; run.coins++; }
+  }
+  if (P.y < KILL_Y) { run.deaths++; respawn(); flash = 'Back to the checkpoint'; flashUntil = run.time + 1.5; }
+  const gx = goal.x - P.x, gz = goal.z - P.z;
+  if (!run.won && gx * gx + gz * gz < 2 && P.y > goal.y - 0.5 && P.y < goal.y + 2.5) win();
+}
+
+function win() {
+  run.won = true; playing = false; keys.clear();
+  document.getElementById('stats').textContent =
+    'Time ' + fmt(run.time) + ' · Coins ' + run.coins + ' / ' + coins.length + ' · Falls ' + run.deaths;
+  winScreen.style.display = 'flex';
+  if (document.exitPointerLock) document.exitPointerLock();
+}
+
+// -------------------------------------------------------------------- LOOP
+const info = document.getElementById('info'), hud = document.getElementById('hud'), msg = document.getElementById('msg');
+const fmt = (t) => { const m = Math.floor(t / 60); return m + ':' + (t - m * 60).toFixed(1).padStart(4, '0'); };
+let flash = '', flashUntil = 0, hudClock = 0;
+let last = 0, frames = 0, fpsStart = 0, fps = 0, acc = 0, steps = 0, started = false;
+let camX = 0, camY = 0, camZ = 0, shadowY = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, last ? (now - last) / 1000 : 0);
+  last = now;
+  if (playing) {
+    if (keys.has('ArrowLeft')) camYaw += CAM_KEY_SPEED * dt;
+    if (keys.has('ArrowRight')) camYaw -= CAM_KEY_SPEED * dt;
+    if (keys.has('ArrowUp')) camPitch = Math.min(1.3, camPitch + CAM_KEY_SPEED * 0.6 * dt);
+    if (keys.has('ArrowDown')) camPitch = Math.max(-0.1, camPitch - CAM_KEY_SPEED * 0.6 * dt);
+    acc += dt;
+    while (acc >= STEP) { step(STEP); acc -= STEP; steps++; }
+  }
+
+  // Moving platforms, the player, and the spinning coins.
+  for (let i = 0; i < movers.length; i++) movers[i].mesh.position.set(movers[i].cx, movers[i].top - THICKNESS / 2, movers[i].cz);
+  playerGroup.position.set(P.x, P.y, P.z);
+  const speed = Math.hypot(P.vx, P.vz);
+  if (speed > 0.5) {
+    let d = Math.atan2(P.vx, P.vz) - P.face;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    P.face += d * Math.min(1, 14 * dt);
+  }
+  playerGroup.rotation.y = P.face;
+  const swing = P.onGround ? Math.sin(now * 0.014) * Math.min(1, speed / WALK_SPEED) * 0.9 : 0.5;
+  legs[0].rotation.x = swing; legs[1].rotation.x = -swing;
+  for (let i = 0; i < coins.length; i++) coins[i].mesh.rotation.y = now * 0.003;
+
+  // The landing shadow: the highest platform top below the feet.
+  let top = -Infinity;
+  for (let i = 0; i < platforms.length; i++) {
+    const p = platforms[i];
+    if (p.maxY <= P.y + 0.05 && p.maxY > top && P.x > p.minX && P.x < p.maxX && P.z > p.minZ && P.z < p.maxZ) top = p.maxY;
+  }
+  shadow.visible = top > -Infinity;
+  if (shadow.visible) { shadow.position.set(P.x, top + 0.03, P.z); const s = Math.max(0.4, 1 - (P.y - top) * 0.08); shadow.scale.set(s, s, s); }
+
+  // Orbit camera: behind the player, turned by the mouse or the arrow keys.
+  const ease = started ? 1 - Math.exp(-CAM_SMOOTH * dt) : 1;
+  started = true;
+  camX += (P.x - camX) * ease; camY += (P.y + 1.2 - camY) * ease; camZ += (P.z - camZ) * ease;
+  const cp = Math.cos(camPitch);
+  camera.position.set(camX + Math.sin(camYaw) * cp * camDist, camY + Math.sin(camPitch) * camDist, camZ + Math.cos(camYaw) * cp * camDist);
+  camera.lookAt(camX, camY, camZ);
+
+  renderer.render(scene, camera);
+
+  frames++;
+  if (now - fpsStart >= 500) { fps = Math.round((frames * 1000) / (now - fpsStart)); frames = 0; fpsStart = now; }
+  hudClock += dt;
+  if (hudClock >= 0.1) {
+    hudClock = 0;
+    info.textContent = fps + ' fps · x ' + P.x.toFixed(1) + ' y ' + P.y.toFixed(1) + ' z ' + P.z.toFixed(1);
+    hud.innerHTML = 'Coins ' + run.coins + ' / ' + coins.length + '<br>' + fmt(run.time) + (run.deaths ? ' · falls ' + run.deaths : '');
+    msg.textContent = run.time < flashUntil ? flash : '';
+  }
+}
+
+// A read-only view for checking the game from outside; nothing here changes it.
+Object.defineProperty(window, '__game', {
+  value: Object.freeze({
+    get state() {
+      return { x: P.x, y: P.y, z: P.z, vx: P.vx, vy: P.vy, vz: P.vz, onGround: P.onGround, ground: P.ground, camYaw, playing, won: run.won,
+        coins: run.coins, coinsTotal: coins.length, deaths: run.deaths, checkpoint: run.checkpoint, time: run.time, steps, fps, simTime };
+    },
+    get platforms() { return platforms.map((p) => ({ minX: p.minX, maxX: p.maxX, minY: p.minY, maxY: p.maxY, minZ: p.minZ, maxZ: p.maxZ, move: p.move, check: p.check })); },
+    get coinPositions() { return coins.map((c) => [c.mesh.position.x, c.mesh.position.y, c.mesh.position.z, c.got]); },
+    get goal() { return goal; },
+    get checkpoints() { return checkpoints.map((c) => [c.x, c.y, c.z]); },
+  }),
+});
+
+// -------------------------------------------------------------------- BOOT
+respawn();
+P.onGround = true;
+camX = P.x; camY = P.y + 1.2; camZ = P.z;
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

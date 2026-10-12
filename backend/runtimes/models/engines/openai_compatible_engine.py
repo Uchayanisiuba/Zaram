@@ -353,6 +353,18 @@ def _thinking_from(delta: dict) -> str:
 #: must not be cached. See `_template_opens_thinking`.
 _NO_SUCH_ROUTE = frozenset({404, 405, 501})
 
+#: How long a server may take to move a model onto the card when asked to. A 27B
+#: exl3 takes minutes, and cutting the connection mid-load leaves the server
+#: unable to answer anything until it finishes (seen with unload, which is the
+#: same kind of route). Matches `OllamaEngine.COLD_START_TIMEOUT`.
+LOAD_TIMEOUT = 600.0
+
+#: A server saying, with a status code, that it holds nothing. 503 on its own
+#: also means "busy", so the sentence is matched as well as the status. The
+#: same pattern lives in `providers/discoverers/openai_compat.py`; copied
+#: rather than imported because the engines do not depend on the provider layer.
+_NOTHING_LOADED = re.compile(r"no models? (?:are |is )?(?:currently )?loaded", re.I)
+
 
 class OpenAICompatibleEngine(LLMEngine):
     """Streams from an OpenAI-compatible `/v1/chat/completions`.
@@ -422,6 +434,88 @@ class OpenAICompatibleEngine(LLMEngine):
     @property
     def endpoint(self) -> str:
         return f"{self.base_url}/chat/completions"
+
+    def load(self, model: str | None = None, *, timeout: float = LOAD_TIMEOUT) -> bool:
+        """Have this server load `model` onto the card, without generating anything.
+
+        **The reason the local preload skipped every server but Ollama was
+        wrong for TabbyAPI.** The comment it left said no OpenAI-compatible
+        server can load without generating, and that is true of the OpenAI
+        contract. TabbyAPI has its own admin route for it, `POST /v1/model/load`,
+        the twin of the `/v1/model/unload` that `release_resident` already
+        calls. With `model_name` empty and `inline_model_loading` on -- which is
+        how the maintainer's server is set up, on purpose -- nothing is on the
+        card until the first request names a model, so the first message of
+        every session paid a full cold start and the orb said *Warming up*.
+
+        **The route is asked, never assumed from the server's name.** A server
+        without it answers 404 or 405 and this returns ``False``, which is what
+        the caller already read as "cannot be warmed".
+
+        Three guards, each from the same lesson as unload:
+
+        * **Loopback only.** Loading is a command to a server on this machine;
+          it is not something to send a cloud provider.
+        * **Never swaps.** If the server already holds a model, this does
+          nothing: the same model is a success (it is warm), a different one is
+          left alone. A load request on a server that holds something unloads
+          it first, and a preload is the wrong reason to evict a model the
+          person is using.
+        * **Waits for the load.** The answer streams progress and ends when the
+          model is resident, so ``True`` means resident rather than requested.
+
+        Never raises. A failure costs a slower first reply and nothing else.
+        """
+        target = (model or self.default_model or "").strip()
+        if not target or not _is_loopback(self.base_url):
+            return False
+        headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
+        gate = self._gate if self._gate is not None else get_gate()
+
+        # What is on the card now? 200 names it; 503 "No models are currently
+        # loaded" is the one answer that means the card is free to use.
+        try:
+            raw = gate.request(
+                f"{self.base_url}/model", method="GET", timeout=5.0, headers=headers, source=self._source
+            )
+            payload = json.loads(raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw)
+            held = str((payload or {}).get("id") or "")
+            if held:
+                same = held.lower() == target.lower()
+                logger.info(
+                    "[OpenAICompatible] %s already holds %s; %s",
+                    self.base_url, held, "warm" if same else "not loading another beside it",
+                )
+                return same
+        except urllib.error.HTTPError as exc:
+            if exc.code in _NO_SUCH_ROUTE:
+                logger.info("[OpenAICompatible] %s cannot be asked to load a model", self.base_url)
+                return False
+            try:
+                said = exc.read().decode("utf-8", "replace") if exc.code == 503 else ""
+            except Exception:  # noqa: BLE001
+                said = ""
+            if not _NOTHING_LOADED.search(said):
+                logger.info("[OpenAICompatible] not loading %s: %s answered %s", target, self.base_url, exc.code)
+                return False
+        except Exception as exc:  # noqa: BLE001 - not knowing what is loaded is not a licence to load
+            logger.info("[OpenAICompatible] not loading %s: %s", target, exc)
+            return False
+
+        try:
+            gate.request(
+                f"{self.base_url}/model/load",
+                method="POST",
+                body=json.dumps({"model_name": target}).encode("utf-8"),
+                timeout=timeout,
+                headers=headers,
+                source=self._source,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.info("[OpenAICompatible] could not preload %s on %s: %s", target, self.base_url, exc)
+            return False
+        logger.info("[OpenAICompatible] %s is resident on %s", target, self.base_url)
+        return True
 
     def _template_opens_thinking(self) -> bool:
         """Does this server's prompt template leave a `<think>` block open?

@@ -252,7 +252,15 @@ class CodeTools:
         if self._runner is not None and self._runs_granted():
             granted.add(RUN_COMMAND)
         if self._app is not None and self._runs_granted():
-            granted |= {apps.START_APP, apps.STOP_APP, apps.LOOK_AT_APP}
+            # Every app tool, not a list of the three that existed first.
+            # This named `start_app`, `stop_app` and `look_at_app` and was
+            # never widened when the stack tools arrived, while `grant_scope`
+            # above sends them to `runs` by the whole set. So the card offered
+            # "Allow for this project", the switch was turned on, and
+            # `start_app_stack` was still not granted -- it asked again, every
+            # time, and only a conversation grant (which is by tool name)
+            # ever stopped it. The two mappings now read one set.
+            granted |= set(apps.TOOL_NAMES)
         if self._driving is not None and self._drives_granted():
             granted |= set(driving.TOOL_NAMES)
         if self._shell is not None and self._shell_granted():

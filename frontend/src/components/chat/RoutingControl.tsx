@@ -37,6 +37,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Brain, Check, CircleCheck, Cloud, HardDrive, RefreshCw, Shuffle } from 'lucide-react';
 import { usePageCheckStore } from '@/stores/pageCheckStore';
+import { BAR_CHIP } from '@/components/chat/barChip';
 
 import { describeDataPolicy } from '@/components/settings/AdvancedModelField';
 import {
@@ -111,9 +112,8 @@ function PageCheckSwitch() {
           ? 'A page Zaram writes is run in a hidden browser with no network, and fixed if it does not start. Press to turn off.'
           : 'Pages are shown as written. Press to run them first and fix what does not start.'
       }
-      className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition-colors"
+      className={BAR_CHIP}
     >
-      <span className="text-slate-700">·</span>
       <CircleCheck size={12} aria-hidden className="shrink-0" />
       <span>{enabled ? 'Page check on' : 'Page check off'}</span>
     </button>
@@ -295,14 +295,17 @@ export default function RoutingControl() {
   }
 
   return (
-    <div ref={root} className="relative flex items-center gap-1.5 text-xs">
+    // Wraps as whole chips: in a narrow panel the row breaks between controls,
+    // never inside one.
+    <div ref={root} className="relative flex flex-wrap items-center gap-1.5 text-xs">
       <button
         type="button"
         onClick={() => void reveal()}
         aria-expanded={open}
         aria-haspopup="dialog"
         data-testid="routing-chip"
-        className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition-colors"
+        title={pinned ? `${modeLabel} · answering: ${pinned}` : undefined}
+        className={`${BAR_CHIP} min-w-0 max-w-full`}
       >
         <Icon size={12} aria-hidden className="shrink-0" />
         <span>{modeLabel}</span>
@@ -310,14 +313,19 @@ export default function RoutingControl() {
             filenames off the primary path when the name is the user's own
             deliberate choice — hiding it would make the control lie about what
             is about to answer. */}
-        {pinned && <span className="text-slate-600">· {pinned}</span>}
+        {/* Cut to fit rather than wrapped: a quantised name such as
+            `Qwen3.8-27B-exl3-2.20bpw` is longer than the panel is wide. The
+            whole name is in the chip's title and in the panel it opens. */}
+        {pinned && (
+          <span className="min-w-0 max-w-[10rem] truncate text-slate-500">· {pinned}</span>
+        )}
       </button>
       {preference === 'prefer_local' && !pinned && (
         // The guarantee, and only where there is one. `prefer_local` removes
         // cloud models from the candidate set outright; `prefer_cloud` is a
         // bias the consent gate still governs, and claiming symmetry would
         // overstate one half and understate the other.
-        <span className="text-slate-600">· stays on this machine</span>
+        <span className="whitespace-nowrap text-slate-600">stays on this machine</span>
       )}
       {thinking !== null && (
         // One press, two states, the current one named. Not a menu: there is
@@ -349,17 +357,16 @@ export default function RoutingControl() {
                 ? 'The model answers directly, except when you ask for code or a page — then it thinks first. Press to think about everything.'
                 : 'The model answers directly — fast. Press to let it think first, for code and pages only.'
           }
-          className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition-colors"
+          className={`${BAR_CHIP} disabled:opacity-50`}
         >
-          <span className="text-slate-700">·</span>
           <Brain size={12} aria-hidden className="shrink-0" />
           <span>{thinking ? 'Thinking on' : forCode ? 'Thinking for code' : 'Thinking off'}</span>
         </button>
       )}
       <PageCheckSwitch />
       {failed && (
-        <span className="text-slate-600" title="The change did not save">
-          · not saved
+        <span className="whitespace-nowrap text-amber-500/80" title="The change did not save">
+          not saved
         </span>
       )}
 

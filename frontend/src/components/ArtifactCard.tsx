@@ -47,8 +47,10 @@ const KIND_ICON: Record<ArtifactKind, React.ReactNode> = {
   spreadsheet: <FileSpreadsheet size={15} />,
   chart: <BarChart3 size={15} />,
   deck: <Presentation size={15} />,
+  presentation: <Presentation size={15} />,
   cv: <UserRound size={15} />,
   image: <ImageIcon size={15} />,
+  video: <ImageIcon size={15} />,
 };
 
 const KIND_COLOUR: Record<ArtifactKind, string> = {
@@ -57,8 +59,10 @@ const KIND_COLOUR: Record<ArtifactKind, string> = {
   spreadsheet: 'var(--color-amber)',
   chart: 'var(--color-violet)',
   deck: 'var(--color-indigo-light)',
+  presentation: 'var(--color-purple)',
   cv: 'var(--color-cyan-light)',
   image: 'var(--color-indigo-light)',
+  video: 'var(--color-indigo-light)',
 };
 
 const bytes = (n: number) => {
