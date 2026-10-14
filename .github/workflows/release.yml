@@ -81,7 +81,15 @@ jobs:
 
       - name: Build the installer
         shell: bash
+        env:
+          # Every alpha is 0.1.0 to Windows, so the tag is the version. Stamped
+          # into the packaged build so it can tell, later, what is newer than it.
+          ZARAM_RELEASE_TAG: ${{ github.ref_name }}
         run: npm run build
+
+      - name: Check the build knows which release it is
+        shell: bash
+        run: node scripts/check-release-stamp.mjs "${GITHUB_REF_NAME}"
 
       - name: Name the artefacts and checksum
         id: art

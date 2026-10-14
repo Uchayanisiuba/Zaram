@@ -256,6 +256,13 @@ cloud-connections.json
 backend/github-connection.json
 github-connection.json
 
+# The update check's answer, and the installer it downloaded (200 MB) -- both written
+# into the data folder, which in a checkout is `backend/` itself.
+backend/updates.json
+updates.json
+backend/updates/
+updates/
+
 # The rest of the data directory, which in a checkout is backend/ itself.
 # The letterhead is the user's business name; mcp-servers.json is their tool
 # servers and the grants they gave each one. Neither is source.

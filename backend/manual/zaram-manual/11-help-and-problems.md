@@ -34,6 +34,16 @@ If you blocked that site on purpose, or the kill switch is on, a download stays 
 
 Correct the fact in **Memory**. Every later answer changes. If the source document is wrong, fix the document; Zaram re-reads a watched folder on its own.
 
+## Updating Zaram
+
+Zaram asks once whether it may check for a newer version when it opens, and the default is yes. A check asks GitHub for the list of releases and sends nothing about you, your computer or your work — no version number, no identifier. It is written to **Activity** like anything else that leaves, and you can turn it off, or press **Check now**, in **Settings → Updates**.
+
+When a newer version exists a small card says so, with the size on the button. **Download** fetches the installer through the same gate as everything else, checks it against the SHA-256 published beside it, and keeps it. Nothing is installed until you press **Restart and install**: Zaram closes, the installer replaces it quietly, and the new version opens. Your memory, documents and settings are kept — an update never asks about them.
+
+Two things it cannot do. The portable build cannot replace itself, so it opens the release page instead. And the builds are not signed yet, so Windows may show its usual warning the first time you install; the checksum guards against a damaged download, not against a release published by someone else with access to the repository. A build that was not made from a release (a development run) cannot tell what is newer and says so.
+
+The very first update has to be done by hand: a copy installed before this existed cannot update itself. Install the newer one over it once, and every one after that comes from inside Zaram.
+
 ## Uninstalling
 
 Uninstall from Windows as usual. The uninstaller asks what to do with your data — keep it, save a copy to the desktop and then delete it, or delete it. Keeping is the default; reinstalling picks it up again. An update never asks.

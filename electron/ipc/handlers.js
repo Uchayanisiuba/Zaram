@@ -269,6 +269,12 @@ function registerHandlers(ipcMain, ctx) {
   // silently do nothing -- the dead-switch shape this project keeps finding.
   const browser = () => (typeof ctx.getBrowser === 'function' ? ctx.getBrowser() : null);
 
+  // Constructed with the other native capabilities, after this runs, so read per
+  // call like the two above. Takes nothing from the renderer.
+  const updateInstaller = () => (typeof ctx.getUpdateInstaller === 'function' ? ctx.getUpdateInstaller() : null);
+  handle(Channels.updates.install, () => updateInstaller()?.install()
+    ?? { ok: false, reason: 'Updating is not available yet.' });
+
   handle(Channels.browser.open, () => browser()?.create() ?? null);
   handle(Channels.browser.select, (id) => browser()?.select(String(id)));
   // Returns the policy's whole decision, refusals included. The renderer

@@ -141,6 +141,8 @@ class TestNothingPrivateIsCarried:
             # the maintainer's provider keys to every stranger.
             "backend/cloud-connections.json",
             "backend/github-connection.json",
+            "backend/updates.json",
+            "backend/updates/Zaram-0.1.0-x64.exe",
             "backend/settings.json",
             "backend/letterhead.json",
             "backend/mcp-servers.json",

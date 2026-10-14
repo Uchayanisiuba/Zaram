@@ -41,6 +41,12 @@ declare global {
          *  to open a page. */
         openExternal(url: string): Promise<unknown>;
       };
+      /** Runs the update the backend has downloaded and checked. Takes nothing:
+       *  the main process asks the backend what to run, so this window cannot
+       *  name a file. Resolves `{ ok: true }` just before Zaram quits. */
+      updates?: {
+        install(): Promise<{ ok: boolean; reason?: string }>;
+      };
       /** The browser pane. The view is main's; the chrome around it is this
        *  renderer's, which is what `setBounds` reconciles. */
       browser?: {

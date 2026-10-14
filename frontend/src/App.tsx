@@ -23,6 +23,7 @@ import { useDueSoon } from './hooks/useDueSoon';
 import SourcePanelLayer from './components/chat/SourcePanelLayer';
 import CommandPalette from './components/CommandPalette';
 import LandingHint from './components/shell/LandingHint';
+import UpdateBanner from './components/shell/UpdateBanner';
 import ConfirmSendDialog from './components/egress/ConfirmSendDialog';
 import Landing from './workspaces/Landing';
 import WorkWorkspace from './workspaces/WorkWorkspace';
@@ -204,6 +205,10 @@ export default function App() {
           surfaces: it owns the /health poll, which Settings and the orb both
           read. Hooks run regardless of what the render returns. */}
       <LandingHint isLanding={isLanding} onNavigate={navigate} />
+
+      {/* A newer build: the one question about checking for it, then only what is
+          true now. A corner of the screen, never in the way of the conversation. */}
+      <UpdateBanner />
 
       {/* Command palette overlay */}
       {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} onNavigate={(id) => navigate(id as WorkspaceId)} />}

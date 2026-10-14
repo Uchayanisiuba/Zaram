@@ -87,6 +87,11 @@ const api = {
     showMessage: (opts) => invoke(Channels.dialog.showMessage, opts),
     selectDirectory: (opts) => invoke(Channels.dialog.selectDirectory, opts),
   },
+  // Runs the update the backend has downloaded and verified. Nothing is passed:
+  // the main process asks the backend what to run.
+  updates: {
+    install: () => invoke(Channels.updates.install),
+  },
   shell: {
     openExternal: (url) => invoke(Channels.shell.openExternal, url),
     openPath: (path) => invoke(Channels.shell.openPath, path),

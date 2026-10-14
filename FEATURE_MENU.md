@@ -153,6 +153,12 @@ Zaram has **six orbital nodes** around the Living Orb, each answering a differen
 - Choose repositories on GitHub; list what Zaram can reach (private and read-only marked)
 - Ask in conversation: push this project, open a pull request, file an issue — each asks every time, no standing yes; no force push
 
+### Updates
+- Asked once, default yes: check for a newer version when Zaram opens (a small card; changeable here) — an anonymous request for the release list, written to Activity, sending no version and nothing about you
+- A newer version shows its size on the Download button; the installer is fetched through the egress gate (every redirect hop logged), checked against its published SHA-256, and kept
+- Restart and install: Zaram closes, the installer runs silently and keeps your data, and the new version opens; nothing runs without that press
+- The portable build and an unstamped development run are sent to the release page instead; Check now is always available
+
 ### Appearance
 - Renderer: Orb / Avatar (frontend-only, not persisted)
 - Reduced motion (respects `prefers-reduced-motion`)

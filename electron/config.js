@@ -102,6 +102,8 @@ function createConfig(options) {
         '/photos',
         // Connect GitHub, from Settings (`packs/github`).
         '/github',
+        // New versions: find, fetch, hand to the installer (`core/updates.py`).
+        '/updates',
         '/diagnostics',
         '/extras',
         '/health',

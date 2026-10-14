@@ -346,6 +346,12 @@ from packs.github.api import router as github_router  # noqa: E402
 
 app.include_router(github_router)
 
+# Updates: find a newer build, fetch it through the egress gate, hand it to the
+# installer. `core/updates.py`.
+from core.update_routes import router as updates_router  # noqa: E402
+
+app.include_router(updates_router)
+
 # --- KERNEL LIFECYCLE ---
 kernel = KernelBootstrapper()
 chat_router = None

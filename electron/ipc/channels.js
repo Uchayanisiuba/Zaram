@@ -122,6 +122,12 @@ backend: {
     vscodeGetGitStatus: 'vscode:get-git-status',
     desktopGetSources: 'desktop:get-sources',
   },
+  // Running an update the backend has already fetched and checked. No
+  // arguments: see `native/updateInstaller.js` for why the renderer names
+  // nothing.
+  updates: {
+    install: 'updates:install',
+  },
   // The browser pane.
   //
   // A BrowserView sits *above* the renderer rather than inside it, so the
@@ -166,6 +172,7 @@ const MAIN_EVENTS = {
 
 /** Channels the renderer is permitted to invoke through the preload bridge. */
 const RENDERER_INVOKABLE = [
+  Channels.updates.install,
   Channels.browser.open,
   Channels.browser.select,
   Channels.browser.navigate,

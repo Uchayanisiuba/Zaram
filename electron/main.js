@@ -16,7 +16,7 @@ const { BackendLauncher } = require('./backend/backendLauncher');
 const { createServices } = require('./services/index');
 const { createStaticServer } = require('./staticServer');
 const { createTray } = require('./native/tray');
-const { createAutoUpdater } = require('./native/autoUpdater');
+const { createUpdateInstaller } = require('./native/updateInstaller');
 const { createFileAssociations } = require('./native/fileAssociations');
 const { createDeepLinks } = require('./native/deepLinks');
 const { createGlobalShortcuts } = require('./native/globalShortcuts');
@@ -47,7 +47,7 @@ let ambient = null;
 let browser = null;
 let browserBackend = null;
 let apiSecret = null;
-let updater = null;
+let updateInstaller = null;
 let logStream = null;
 let appLoaded = false;
 let quitting = false;
@@ -265,6 +265,21 @@ async function bootstrap() {
   apiSecret = crypto.randomBytes(32).toString('base64url');
   process.env.ZARAM_API_SECRET = apiSecret;
 
+  // Which release this is. Every alpha is 0.1.0 to Windows, so the version in
+  // package.json cannot say, and an update check has to know what it is newer
+  // than. The release workflow stamps the tag into the packaged package.json
+  // (`scripts/build-installer.mjs`); it is handed to the backend here and only
+  // when it looks like a release tag. A checkout carries no stamp, and the
+  // backend then says it cannot tell, rather than guessing it is old.
+  try {
+    const stamp = require(path.join(app.getAppPath(), 'package.json')).zaramRelease;
+    if (typeof stamp === 'string' && /^v\d+\.\d+\.\d+(-[A-Za-z]+\.\d+)?$/.test(stamp) && !process.env.ZARAM_RELEASE_TAG) {
+      process.env.ZARAM_RELEASE_TAG = stamp;
+    }
+  } catch (err) {
+    logger.warn('Could not read the release stamp', { error: err.message });
+  }
+
   // Deep-link protocol registration (Windows/Linux).
   if (!process.defaultApp) {
     try {
@@ -357,6 +372,7 @@ async function bootstrap() {
     // the other native capabilities, after this runs.
     getBrowser: () => browser,
     getApiSecret: () => apiSecret,
+    getUpdateInstaller: () => updateInstaller,
   });
 
   if (loadedDesktop && desktopRuntime) {
@@ -485,9 +501,12 @@ async function bootstrap() {
   });
   const ambientStarted = ambient.start();
   logger.info('Ambient surface', ambientStarted);
-  updater = createAutoUpdater({
-    onState: (s) => pushToRenderer(MAIN_EVENTS.updaterState, s),
-    logger,
+  updateInstaller = createUpdateInstaller({
+    app,
+    logger: logger.child('updates'),
+    getBaseUrl: () => config.backend.baseUrl,
+    getSecret: () => apiSecret,
+    isDev,
   });
   createDeepLinks({
     scheme: 'zaram',
@@ -548,10 +567,6 @@ async function bootstrap() {
   }
 
   backend.start();
-
-  if (!isDev) {
-    updater.checkForUpdates();
-  }
 }
 
 app.whenReady().then(bootstrap).catch((err) => {

@@ -45,8 +45,23 @@ if (subject) {
   // subject has — arrives intact.
   args.push(`--config.win.certificateSubjectName=${subject}`);
 }
+// **The release stamp.** Every alpha is `0.1.0` to Windows, so the version in
+// package.json cannot say which build this is, and an update check has to know
+// what it is newer than. The release workflow sets ZARAM_RELEASE_TAG to the tag;
+// it is written into the packaged package.json as `zaramRelease`, which
+// `electron/main.js` hands to the backend. A development build has none and the
+// backend says it cannot tell. `scripts/check-release-stamp.mjs` proves it landed.
+const release = (process.env.ZARAM_RELEASE_TAG || '').trim();
+if (release) {
+  if (!/^v\d+\.\d+\.\d+(-[A-Za-z]+\.\d+)?$/.test(release)) {
+    console.error(`build:installer — ZARAM_RELEASE_TAG is "${release}", which is not a release tag like v0.1.0-alpha.8.`);
+    process.exit(1);
+  }
+  args.push(`--config.extraMetadata.zaramRelease=${release}`);
+}
 args.push(...forwarded);
 
+console.log(release ? `build:installer — stamped as ${release}.` : 'build:installer — no release stamp; this build cannot tell which release it is.');
 console.log(
   subject
     ? `build:installer — signing as "${subject}".`

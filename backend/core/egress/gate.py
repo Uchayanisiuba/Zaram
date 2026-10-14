@@ -518,3 +518,78 @@ class EgressGate:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             for line in resp:
                 yield line
+
+
+    def download_to_file(
+        self,
+        url: str,
+        destination: Any,
+        *,
+        source: str = "unknown",
+        data_class: DataClass = DataClass.PROMPT,
+        timeout: float = 60.0,
+        max_bytes: int = 1 << 30,
+        headers: dict[str, str] | None = None,
+        progress: Callable[[int, int], None] | None = None,
+        digest: Any = None,
+    ) -> int:
+        """Check, log, and stream a response body into ``destination``; returns the bytes written.
+
+        Added for the update, which is the first thing Zaram fetches that is a
+        file rather than a page or a reply -- 200 MB, where :meth:`request`
+        would hold all of it in memory and :meth:`stream_lines` is made for
+        text. It is on the gate for the same reason as the others: the
+        chokepoint test refuses a module that opens its own connection.
+
+        **Every hop of a redirect is its own decision.** A release asset on
+        GitHub answers with a redirect to a storage host, and ``urllib`` follows
+        it without being asked, which would put a request to a destination nobody
+        named past the log. Each hop is checked and logged before it is followed,
+        so the person's rules apply to where the bytes actually come from, and a
+        hop to a host they blocked is refused rather than followed. Only https is
+        followed, except to this machine, where tests stand a server.
+
+        ``destination`` is a path or a binary file object. ``digest`` is anything
+        with ``update(bytes)`` -- a ``hashlib`` object -- fed as the bytes arrive,
+        so the file is hashed once and not read back. ``max_bytes`` stops a
+        response that never ends from filling the disk.
+        """
+        self.check(url, method="GET", body=None, source=source, data_class=data_class)
+        gate = self
+
+        class _Hop(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, hdrs, newurl):  # noqa: N802
+                parsed = urllib.parse.urlparse(newurl)
+                if parsed.scheme != "https" and not is_local(newurl):
+                    raise urllib.error.URLError(f"refusing to follow a redirect to {parsed.scheme or 'an unknown scheme'}")
+                gate.check(newurl, method="GET", body=None, source=source, data_class=data_class)
+                return super().redirect_request(req, fp, code, msg, hdrs, newurl)
+
+        opener = urllib.request.build_opener(_Hop)
+        req = urllib.request.Request(
+            url, method="GET", headers={"User-Agent": self._user_agent, **(headers or {})}
+        )
+        written = 0
+        owns = isinstance(destination, (str, bytes)) or hasattr(destination, "__fspath__")
+        handle = open(destination, "wb") if owns else destination
+        try:
+            with opener.open(req, timeout=timeout) as resp:
+                total = int(resp.headers.get("Content-Length") or 0)
+                if total and total > max_bytes:
+                    raise urllib.error.URLError(f"the file is {total} bytes, over the {max_bytes} limit")
+                while True:
+                    chunk = resp.read(1 << 20)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise urllib.error.URLError(f"the response went over the {max_bytes} limit")
+                    handle.write(chunk)
+                    if digest is not None:
+                        digest.update(chunk)
+                    if progress is not None:
+                        progress(written, total)
+        finally:
+            if owns:
+                handle.close()
+        return written

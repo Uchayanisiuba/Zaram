@@ -131,6 +131,8 @@ export default defineConfig(({ command }) => ({
       '/photos': { target: BACKEND, changeOrigin: true },
       // Connect GitHub, from Settings (`packs/github`).
       '/github': { target: BACKEND, changeOrigin: true },
+      // New versions: find, fetch, hand to the installer (`core/updates.py`).
+      '/updates': { target: BACKEND, changeOrigin: true },
       '/artifacts': { target: BACKEND, changeOrigin: true },
       // What is listening on this machine, for the browser pane's new tab.
       // Added because `proxied.test.ts` refused the commit without it: an

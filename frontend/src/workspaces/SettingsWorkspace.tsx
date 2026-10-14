@@ -45,6 +45,7 @@ import LetterheadSection from '../components/settings/LetterheadSection';
 import ToolsSection from '../components/settings/ToolsSection';
 import ComputerUseSection from '../components/settings/ComputerUseSection';
 import GitHubSection from '../components/settings/GitHubSection';
+import UpdatesSection from '../components/settings/UpdatesSection';
 import RunsOnItsOwnSection from '../components/settings/RunsOnItsOwnSection';
 import ReportSection from '../components/settings/ReportSection';
 import ManualReader from '../components/settings/ManualReader';
@@ -2050,6 +2051,14 @@ export default function SettingsWorkspace() {
           icon={<GitBranch size={14} style={{ color: 'var(--color-indigo-light)' }} />}
         >
           <GitHubSection Row={Row} />
+        </Section>
+
+        {/* -------------------------------------------------------------- Updates */}
+        <Section
+          title="Updates"
+          icon={<RefreshCw size={14} style={{ color: 'var(--color-cyan-light)' }} />}
+        >
+          <UpdatesSection Row={Row} />
         </Section>
 
         {/* ----------------------------------------------------- Computer Use */}

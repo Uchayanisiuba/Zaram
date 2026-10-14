@@ -96,6 +96,8 @@ files:
   # the list: nothing under backend/ that git does not track may ship.
   - "!backend/cloud-connections.json"   # provider keys
   - "!backend/github-connection.json"   # the GitHub sign-in, sealed to the Windows user
+  - "!backend/updates.json"             # the update check's last answer
+  - "!backend/updates"                  # the installer an update downloaded
   - "!backend/settings.json"            # assistant name, manner, routing
   - "!backend/letterhead.json"          # the user's business name and logo
   - "!backend/mcp-servers.json"         # the user's tool servers and grants
