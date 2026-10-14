@@ -17,7 +17,7 @@ not developers building products.
 ## Try it
 
 **Windows, alpha.** The current build is
-[`v0.1.0-alpha.7`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.7)
+[`v0.1.0-alpha.8`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.8)
 — an installer and a portable build, 199 MiB each, with `SHA256SUMS.txt` beside them.
 It is not code-signed yet, so SmartScreen warns; *More info → Run anyway*. Everything
 works with a local model through [Ollama](https://ollama.com) and nothing else; a cloud
@@ -101,7 +101,7 @@ evidence of June it is the only part anybody owned at all.
 
 ## Status
 
-**Pre-v1, alpha.7 (14 October 2026), with testers from 21 September 2026.** What has been observed
+**Pre-v1, alpha.8 (14 October 2026), with testers from 21 September 2026.** What has been observed
 working, rather than merely written:
 
 - **The recall loop, end to end.** The Spine persists to SQLite with Ollama `bge-m3`
@@ -144,8 +144,8 @@ working, rather than merely written:
 - **Thinking has a middle state** — off, *for code*, on. Off by default for code; whether
   it helps is unmeasured, and `scripts/compare_thinking.py` is how it will be.
 - **An installer**, built by the release workflow on a hosted runner from the tag,
-  published as [`v0.1.0-alpha.7`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.7)
-  with the SHA-256 beside it. Unsigned; SmartScreen will warn. **For alpha.4 to alpha.7 the
+  published as [`v0.1.0-alpha.8`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.8)
+  with the SHA-256 beside it. Unsigned; SmartScreen will warn. **For alpha.4 to alpha.8 the
   installer itself has not been cold-installed** (alpha.2 and alpha.3 were): the release
   workflow's own checks passed, but nobody has installed the published file on a clean
   machine and started it.
