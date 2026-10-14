@@ -31,6 +31,13 @@ const repo = 'https://github.com/Uchayanisiuba/Zaram';
 /** What each build brought, in the site's own words — the same list the
  *  Milestones panel carries. Add the next tag above the last. */
 const BROUGHT = {
+  'v0.1.0-alpha.8': [
+    '**Zaram can update itself.** It asks once, when it first opens, whether it may check for a newer version — the default is yes, and *Settings → Updates* changes it. A check asks GitHub for the list of releases and sends nothing about you or your work: no version, no identifier. It appears in Activity like anything else that leaves.',
+    '**You press the button; nothing runs by itself.** A newer version shows its size on a *Download* button. The installer is fetched through the same gate as everything else (every redirect is logged), checked against the SHA-256 published beside it, and kept. *Restart and install* closes Zaram, runs the installer quietly and opens the new version. Your memory, documents and settings are kept — an update never asks about them.',
+    '**Seen working:** the check, the redirect to GitHub’s storage host, the 199 MB download and its checksum, against the real alpha.7 release, with every request in the egress log. **Not seen:** the final step, the installer replacing a running copy — it was not run on a machine that already has Zaram installed. It uses the installer’s own silent-update flags, and the installer’s guard that stops an update from asking about your data.',
+    '**To get onto it, install this one by hand.** A copy installed before this release cannot update itself; run this installer over it once, and every later version arrives from inside Zaram. The portable build cannot replace itself and opens the release page instead.',
+    '**Not signed yet.** Windows may warn the first time. The checksum guards against a damaged download, not against a release published by someone else with access to the repository; a signature is the fix and is still ahead.',
+  ],
   'v0.1.0-alpha.7': [
     '**Fixed: “Set up a local model” could not be pressed.** On a computer with no local engine it was the first offer on the first-run screen, and the only one greyed out. It now opens a card, then the engine’s download page in your browser; once the engine is running the screen moves on by itself and offers the first model. Zaram does not download or run the installer for you.',
     '**Fixed: a freshly installed engine was not noticed.** An engine that was running but held no models was read as no engine at all, so the screen would have kept offering to set one up after you had. It is now seen as installed, and offers a model.',

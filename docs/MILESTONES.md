@@ -13091,3 +13091,60 @@ greyed, so a fifth kind added without an executor is caught.
 readiness asked every four seconds (backend log: three requests in twelve
 seconds), on a scratch backend that could not reach Ollama. **Not seen:** a real
 install followed by the screen advancing; the packaged window; a cold install.
+
+### 14 October — Zaram can update itself (alpha.8)
+
+Rule 7g was amended on 16 August to say update checks are asked for once and
+default to yes. Nothing asked, and nothing checked: every build had been a
+download run by hand over the last. A tester on alpha.6 was the prompt.
+
+**The shape, and why it is not `electron-updater`.** That library makes its own
+requests from the main process, where the egress log cannot see them — the reason
+rule 3 is built as a chokepoint. The stub that wrapped it (`native/autoUpdater.js`,
+never configured, no renderer listening) is deleted. Instead the backend does the
+networking and the shell does the one thing the backend cannot:
+
+- `core/updates.py`: lists releases (an anonymous GET — no version, no identifier,
+  smaller than the amendment allows), orders tags (alpha.10 above alpha.9), takes the
+  newest release that carries the installer the build names and a `SHA256SUMS.txt`,
+  refuses asset addresses outside the repository's release path, fetches the
+  installer and the checksum through `EgressGate`, and hands over only a file whose
+  SHA-256 matches. It never starts a program.
+- `EgressGate.download_to_file`: streams a file, and **checks and logs every
+  redirect hop** — a release asset redirects to a storage host `urllib` would have
+  followed unasked, past the log. Mutation-tested: with the hop check removed, the
+  tests fail.
+- `electron/native/updateInstaller.js`: asks the backend (not the renderer) what to
+  run, re-hashes it, and starts it from the `quit` event, detached, with `/S
+  --updated --force-run` — the NSIS template's own flags. `--updated` is what
+  `build/installer.nsh` guards on so that an update never asks about the person's data.
+  Refused on a development run, a portable build, and anything but Windows.
+- The question is a card with the answer's meaning in the same sentence (what a
+  check sends, where it is logged); `Settings → Updates` flips it. "Later" is for the
+  session and never nags.
+- **A stamp.** Every alpha is `0.1.0` to Windows, so the tag is the version: the
+  workflow passes it to `scripts/build-installer.mjs` (`extraMetadata.zaramRelease`),
+  `electron/main.js` hands it to the backend, and `scripts/check-release-stamp.mjs`
+  reads it back out of the built `app.asar` and fails the release if it is missing —
+  an unstamped build could never be told about the next one, and nothing else would notice.
+- Retention: `updates.json` holds a flag, a timestamp, the last answer and the name of
+  the file; the installer is deleted once the running build has caught up, and a new
+  download removes the old. Excluded from git and from the build.
+
+**Seen live, against the real repository:** a scratch backend pretending to be alpha.6
+checked GitHub (after the question was answered — nothing left before), found alpha.7,
+downloaded the real 208,539,009-byte installer, and matched the published SHA-256
+(checked again independently with `sha256sum`). The egress log held four entries for
+it: the release list, the checksums, the asset, and the storage-host redirect. The
+card, the progress, *Restart and install* in a browser (which says it only works in the
+desktop app) were all seen.
+
+**Not seen, and it is the last step:** the installer replacing a running copy. A
+packaged Zaram is already installed on the maintainer's machine, and its installer
+shares an uninstall key with every other build — running it as a test would have
+overwritten that registration, so it was not run. Verified from the NSIS template's
+source instead (`--force-run` starts the app under a silent install; `${isUpdated}`
+guards the data prompt). A portable build and the packaged window were not looked at.
+
+**The bootstrap problem is not solved, only stated:** nothing installed before
+alpha.8 contains an updater, so the first move onto it is by hand.
