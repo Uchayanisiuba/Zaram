@@ -13066,3 +13066,28 @@ window; a cold install of the published installer.
 opted out of expiring user tokens (Zaram holds no client secret, so it cannot
 refresh one; a token that does not expire is sealed on this machine and revoked
 by Disconnect plus GitHub's own page).
+
+### 14 October — the first-run offer can be pressed (alpha.7)
+
+A tester on alpha.6: *the local model download option is not clickable.* On a
+machine with no engine, `install_engine` is the first offer and was the only one
+left greyed ("Zaram can't set this up for you yet") — the last of the four kinds
+without an executor. `EngineInstall` is it: the second press opens the engine's
+download page, then readiness is asked again every four seconds until the engine
+answers and the screen offers a model by itself. It opens a page; it does not
+fetch or run an installer, which has its own consent and failure modes and could
+not be tried on a machine that already has one.
+
+**Found while fixing it:** `/readiness` decided "engine installed" from whether
+discovery returned models, so a freshly installed engine — running, empty — read
+as no engine. The first fix alone would have sent the person in a circle. It now
+asks the engine's own health when discovery is empty.
+
+The test that asserted the offer was greyed was a decision about the state of the
+code, not a rule; it now asserts that no offer on either first-run state is
+greyed, so a fifth kind added without an executor is caught.
+
+**Seen:** the offer enabled, the card on the first press, the page on the second,
+readiness asked every four seconds (backend log: three requests in twelve
+seconds), on a scratch backend that could not reach Ollama. **Not seen:** a real
+install followed by the screen advancing; the packaged window; a cold install.

@@ -31,6 +31,11 @@ const repo = 'https://github.com/Uchayanisiuba/Zaram';
 /** What each build brought, in the site's own words — the same list the
  *  Milestones panel carries. Add the next tag above the last. */
 const BROUGHT = {
+  'v0.1.0-alpha.7': [
+    '**Fixed: “Set up a local model” could not be pressed.** On a computer with no local engine it was the first offer on the first-run screen, and the only one greyed out. It now opens a card, then the engine’s download page in your browser; once the engine is running the screen moves on by itself and offers the first model. Zaram does not download or run the installer for you.',
+    '**Fixed: a freshly installed engine was not noticed.** An engine that was running but held no models was read as no engine at all, so the screen would have kept offering to set one up after you had. It is now seen as installed, and offers a model.',
+    '**Known: not seen end to end.** The button, the card, the page and the four-second check were seen working; a real install followed by the screen advancing was not. GitHub is unchanged from alpha.6, including that a push, pull request and issue against a real repository have not been run.',
+  ],
   'v0.1.0-alpha.6': [
     '**Connect GitHub, and Zaram can push your project.** *Settings → GitHub → Connect* shows a short code; you type it at github.com in your own browser, so no password and no token ever passes through Zaram. You choose which repositories the Zaram app may reach, on GitHub. Then, in a conversation: “push this project”, “open a pull request for this branch”, “file an issue about the crash”.',
     '**Every change on GitHub asks, every time.** A push, a pull request, an issue and a new repository each stop at a card that names the repository and the branch or title; there is no “always allow” for them. A push is never forced, only reaches repositories you installed the app on, and is logged as a repository leaving — how many commits and where, never what they said.',
