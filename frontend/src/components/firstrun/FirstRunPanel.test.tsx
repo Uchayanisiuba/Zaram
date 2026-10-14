@@ -8,9 +8,10 @@
  * screen is seen once per user and there is no second first impression.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, act } from '@testing-library/react';
 
 import FirstRunPanel from './FirstRunPanel';
+import { ENGINE_DOWNLOAD_URL, WATCH_EVERY_MS } from './EngineInstall';
 import { pullRecommendedModel } from '@/services/pullClient';
 import type { ReadinessReport } from '@/services/readinessClient';
 
@@ -182,29 +183,82 @@ describe('the first-run screen', () => {
     expect(onExplore).toHaveBeenCalledTimes(1);
   });
 
-  it('does not pretend to carry out what nothing can carry out yet', () => {
-    const onExplore = vi.fn();
-    render(<FirstRunPanel report={noEngine} onExplore={onExplore} onConnected={() => {}} />);
-
-    // Greyed and stated, not silently inert. A button that takes a click and
-    // does nothing is the worst thing on a first-run screen: the user concludes
-    // the product is broken rather than unconfigured, which is the exact
-    // impression this screen exists to prevent.
+  it('lets every offer on the screen be pressed — none is greyed', () => {
+    // Reported 14 October 2026 against alpha.6: "the local model download option
+    // is not clickable". On a machine with no engine the first offer is
+    // `install_engine`, and it was the one thing left greyed with "Zaram can't
+    // set this up for you yet". A button that takes a click and does nothing is
+    // the worst thing on a first-run screen, and a greyed one reads as the same
+    // thing: the user concludes the product is broken rather than unconfigured.
     //
-    // `use_cloud_key` left this list on 29 August 2026 and `pull_model` on
-    // 5 September, each because it gained an executor — not because the rule
-    // softened. Installing an engine still has none.
-    for (const kind of ['install_engine']) {
-      const button = offerButton(kind);
-      if (!button) continue;
-      expect(button).toBeDisabled();
-      // And it says so in words. A greyed button explains nothing on its own,
-      // and the detail line above it describes an action — "installs the
-      // engine" — that this button does not perform.
-      expect(button).toHaveAccessibleName(/can’t set this up for you yet/);
-      button.click();
+    // So the rule is stated over every offer in both states rather than over
+    // the one that happens to be greyed today: if a fifth kind is ever added
+    // without an executor, this is where it is caught.
+    for (const report of [noEngine, engineWithoutModel]) {
+      const { unmount } = render(
+        <FirstRunPanel report={report} onExplore={() => {}} onConnected={() => {}} />,
+      );
+      for (const offer of report.offers) {
+        const button = offerButton(offer.kind);
+        expect(button, offer.kind).not.toBeDisabled();
+        expect(button.textContent, offer.kind).not.toMatch(/can’t set this up for you yet/);
+      }
+      unmount();
     }
-    expect(onExplore).not.toHaveBeenCalled();
+  });
+
+  it('opens the engine’s download page on the second press, and says what happens next', async () => {
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const onConnected = vi.fn();
+    render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={onConnected} />);
+
+    // Opening the row shows what will happen and opens nothing: the page is the
+    // person's browser's request, and it should not begin on a curious click.
+    offerButton('install_engine').click();
+    await screen.findByTestId('engine-install');
+    expect(opened).not.toHaveBeenCalled();
+    expect(screen.getByTestId('engine-install').textContent).toMatch(/moves on by itself/i);
+    expect(screen.getByTestId('engine-install').textContent).toMatch(/nothing you type leaves/i);
+
+    screen.getByTestId('open-engine-download').click();
+    expect(opened).toHaveBeenCalledWith(ENGINE_DOWNLOAD_URL, '_blank', 'noopener,noreferrer');
+    await screen.findByRole('status');
+    opened.mockRestore();
+  });
+
+  it('keeps asking whether the engine has started once the page is open, and stops when left', () => {
+    vi.useFakeTimers();
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const onConnected = vi.fn();
+    const { unmount } = render(
+      <FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={onConnected} />,
+    );
+    act(() => offerButton('install_engine').click());
+    // Nothing is polled before the page has been opened.
+    act(() => { vi.advanceTimersByTime(WATCH_EVERY_MS * 3); });
+    expect(onConnected).not.toHaveBeenCalled();
+
+    act(() => screen.getByTestId('open-engine-download').click());
+    act(() => { vi.advanceTimersByTime(WATCH_EVERY_MS * 2); });
+    expect(onConnected).toHaveBeenCalledTimes(2);
+
+    unmount();
+    act(() => { vi.advanceTimersByTime(WATCH_EVERY_MS * 3); });
+    expect(onConnected).toHaveBeenCalledTimes(2);
+    opened.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('offers a manual check once the page has been opened', () => {
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const onConnected = vi.fn();
+    render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={onConnected} />);
+    act(() => offerButton('install_engine').click());
+    expect(screen.queryByTestId('check-engine')).toBeNull();
+    act(() => screen.getByTestId('open-engine-download').click());
+    act(() => screen.getByTestId('check-engine').click());
+    expect(onConnected).toHaveBeenCalledTimes(1);
+    opened.mockRestore();
   });
 
   it('lets the model offer be carried out, and does not start the download on a curious click', async () => {

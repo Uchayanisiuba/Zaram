@@ -1548,8 +1548,19 @@ async def readiness():
     try:
         # Short timeout. A machine without Ollama should reach the offer screen
         # quickly rather than sit on a spinner deciding it is broken.
-        discovered = await OllamaAdapter().discover_models(timeout=1.5)
+        adapter = OllamaAdapter()
+        discovered = await adapter.discover_models(timeout=1.5)
         engine_installed = bool(discovered)
+        if not engine_installed:
+            # **An engine with nothing on it is still an engine.** This read
+            # `bool(discovered)` alone, so a freshly installed Ollama -- running,
+            # empty -- looked exactly like no Ollama, and the screen that sent
+            # somebody to install it kept saying "set up a local model" after they
+            # had. Found 14 October 2026 while making that offer clickable: the
+            # fix for the button would have led the person in a circle. Only
+            # reached when discovery came back empty, so a machine with models
+            # pays nothing extra.
+            engine_installed = bool((await adapter.health()).get("available"))
         for model in discovered:
             name = model.id or model.display_name
             # Embedding models cannot hold a conversation. Counting bge-m3 as a

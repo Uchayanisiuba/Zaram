@@ -41,6 +41,7 @@
 import { useState } from 'react';
 
 import CloudKeyForm from './CloudKeyForm';
+import EngineInstall from './EngineInstall';
 import ModelPull from './ModelPull';
 import ModelBrowser from '@/components/models/ModelBrowser';
 import type { ReadinessOffer, ReadinessReport } from '@/services/readinessClient';
@@ -78,13 +79,20 @@ interface FirstRunPanelProps {
  * model from the same manifest lookup that produced this offer, so the thing
  * fetched is the thing priced on the button.
  *
- * Installing an engine still has no executor. Inventing an instruction for it
- * here — a command to type, a site to visit — would put a value in the
- * interface that nothing else in the product maintains. When that executor
- * lands, this function is where it is admitted.
+ * **Setting up the engine was admitted on 14 October 2026** — `EngineInstall`
+ * is its executor. It was the one offer left greyed, and it is the first thing a
+ * person with no engine sees, so the whole first-run screen read as broken: *"the
+ * local model download option is not clickable"*, reported against alpha.6. It
+ * opens the engine's download page and watches for the engine to start; it does
+ * not fetch or run an installer itself (see that file for why).
  */
 function canBeCarriedOut(kind: string): boolean {
-  return kind === 'explore' || kind === 'use_cloud_key' || kind === 'pull_model';
+  return (
+    kind === 'explore' ||
+    kind === 'use_cloud_key' ||
+    kind === 'pull_model' ||
+    kind === 'install_engine'
+  );
 }
 
 export default function FirstRunPanel({ report, onExplore, onConnected }: FirstRunPanelProps) {
@@ -118,7 +126,11 @@ export default function FirstRunPanel({ report, onExplore, onConnected }: FirstR
                 <OfferRow
                   offer={offer}
                   onChoose={() => {
-                    if (offer.kind === 'use_cloud_key' || offer.kind === 'pull_model') {
+                    if (
+                      offer.kind === 'use_cloud_key' ||
+                      offer.kind === 'pull_model' ||
+                      offer.kind === 'install_engine'
+                    ) {
                       // Toggled rather than navigated. The executor belongs
                       // under the offer it belongs to, where the price and the
                       // detail above it stay readable — a setup screen that
@@ -133,6 +145,11 @@ export default function FirstRunPanel({ report, onExplore, onConnected }: FirstR
                 {openOffer === offer.kind && offer.kind === 'use_cloud_key' && (
                   <div className="pl-3">
                     <CloudKeyForm onConnected={onConnected} />
+                  </div>
+                )}
+                {openOffer === offer.kind && offer.kind === 'install_engine' && (
+                  <div className="pl-3">
+                    <EngineInstall onCheck={onConnected} />
                   </div>
                 )}
                 {openOffer === offer.kind && offer.kind === 'pull_model' && (

@@ -436,3 +436,45 @@ class TestTheMachineIsDescribedInTheManifestsTiers:
 
         d = diagnose(engine_installed=True, chat_models=["x"], budget_bytes=12 * 1024**3)
         assert "This machine" not in d.summary
+
+
+class TestAnEngineWithNothingOnItIsStillAnEngine:
+    """Found 14 October 2026, making "Set up a local model" clickable.
+
+    The route decided the engine was installed from whether discovery returned
+    any models. A freshly installed Ollama is running and holds none, so it
+    reported `no_engine` -- and the screen that had just sent the person to install
+    one carried on offering to set one up. These go through the route, with the
+    adapter stubbed at the two calls it makes rather than a socket.
+    """
+
+    @staticmethod
+    async def _readiness(monkeypatch, *, models, available):
+        import main
+        from providers.discoverers.ollama import OllamaAdapter
+
+        async def discover(self, timeout=1.5):
+            return models
+
+        async def health(self):
+            return {"available": available}
+
+        monkeypatch.setattr(OllamaAdapter, "discover_models", discover)
+        monkeypatch.setattr(OllamaAdapter, "health", health)
+        monkeypatch.setattr(main, "kernel", SimpleNamespace())
+        monkeypatch.delenv("ZARAM_OPENAI_KEY", raising=False)
+        return await main.readiness()
+
+    @pytest.mark.asyncio
+    async def test_a_running_engine_with_no_models_is_offered_a_model(self, monkeypatch):
+        payload = await self._readiness(monkeypatch, models=[], available=True)
+
+        assert payload["readiness"] == "engine_without_model"
+        assert [o["kind"] for o in payload["offers"]][0] == "pull_model"
+
+    @pytest.mark.asyncio
+    async def test_no_engine_at_all_is_still_offered_the_engine(self, monkeypatch):
+        payload = await self._readiness(monkeypatch, models=[], available=False)
+
+        assert payload["readiness"] == "no_engine"
+        assert [o["kind"] for o in payload["offers"]][0] == "install_engine"
